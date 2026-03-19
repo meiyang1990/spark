@@ -30,16 +30,14 @@ import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.util.{AccumulatorV2, TaskCompletionListener, TaskFailureListener}
 
 
+/** TaskContext伴生对象，通过ThreadLocal管理当前线程的任务上下文 */
 object TaskContext {
-  /**
-   * Return the currently active TaskContext. This can be called inside of
-   * user functions to access contextual information about running tasks.
-   */
+  /** 获取当前活跃的TaskContext，可在用户函数中调用以获取任务的上下文信息 */
   def get(): TaskContext = taskContext.get
 
   /**
-   * Returns the partition id of currently active TaskContext. It will return 0
-   * if there is no active TaskContext for cases like local execution.
+   * 获取当前活跃TaskContext的分区ID。
+   * 如果没有活跃的TaskContext（如本地执行时），返回0。
    */
   def getPartitionId(): Int = {
     val tc = taskContext.get()
@@ -50,6 +48,7 @@ object TaskContext {
     }
   }
 
+  /** 在指定TaskContext下执行任务，确保执行完毕后清除ThreadLocal中的上下文 */
   def withTaskContext[T](context: TaskContext)(task: => T): T = {
     try {
       TaskContext.setTaskContext(context)
@@ -59,23 +58,16 @@ object TaskContext {
     }
   }
 
+  // 使用ThreadLocal保存当前线程的TaskContext，确保每个任务线程有独立的上下文
   private[this] val taskContext: ThreadLocal[TaskContext] = new ThreadLocal[TaskContext]
 
-  // Note: protected[spark] instead of private[spark] to prevent the following two from
-  // showing up in JavaDoc.
-  /**
-   * Set the thread local TaskContext. Internal to Spark.
-   */
+  /** 设置当前线程的TaskContext（Spark内部使用） */
   protected[spark] def setTaskContext(tc: TaskContext): Unit = taskContext.set(tc)
 
-  /**
-   * Unset the thread local TaskContext. Internal to Spark.
-   */
+  /** 清除当前线程的TaskContext（Spark内部使用） */
   protected[spark] def unset(): Unit = taskContext.remove()
 
-  /**
-   * An empty task context that does not represent an actual task.  This is only used in tests.
-   */
+  /** 创建一个空的TaskContext，仅用于测试 */
   private[spark] def empty(): TaskContextImpl = {
     new TaskContextImpl(0, 0, 0, 0, 0, 1,
       null, new Properties, null, TaskMetrics.empty, 1)
@@ -84,84 +76,48 @@ object TaskContext {
 
 
 /**
- * Contextual information about a task which can be read or mutated during
- * execution. To access the TaskContext for a running task, use:
- * {{{
- *   org.apache.spark.TaskContext.get()
- * }}}
+ * 任务的上下文信息，可在任务执行期间读取或修改。
+ * 通过org.apache.spark.TaskContext.get()获取当前运行任务的TaskContext。
  */
 abstract class TaskContext extends Serializable {
-  // Note: TaskContext must NOT define a get method. Otherwise it will prevent the Scala compiler
-  // from generating a static get method (based on the companion object's get method).
+  // 注意：TaskContext不能定义get方法，否则会阻止Scala编译器基于伴生对象生成静态get方法
 
-  // Note: Update JavaTaskContextCompileCheck when new methods are added to this class.
-
-  // Note: getters in this class are defined with parentheses to maintain backward compatibility.
-
-  /**
-   * Returns true if the task has completed.
-   */
+  /** 任务是否已完成 */
   def isCompleted(): Boolean
 
-  /**
-   * Returns true if the task has failed.
-   */
+  /** 任务是否已失败 */
   def isFailed(): Boolean
 
-  /**
-   * Returns true if the task has been killed.
-   */
+  /** 任务是否已被中断（取消） */
   def isInterrupted(): Boolean
 
   /**
-   * Adds a (Java friendly) listener to be executed on task completion.
-   * This will be called in all situations - success, failure, or cancellation. Adding a listener
-   * to an already completed task will result in that listener being called immediately.
-   *
-   * Two listeners registered in the same thread will be invoked in reverse order of registration if
-   * the task completes after both are registered. There are no ordering guarantees for listeners
-   * registered in different threads, or for listeners registered after the task completes.
-   * Listeners are guaranteed to execute sequentially.
-   *
-   * An example use is for HadoopRDD to register a callback to close the input stream.
-   *
-   * Exceptions thrown by the listener will result in failure of the task.
+   * 添加任务完成监听器（Java友好版本）。
+   * 在所有情况下都会被调用——成功、失败或取消。
+   * 对已完成的任务添加监听器会导致该监听器立即被调用。
+   * 同一线程注册的两个监听器在任务完成后按注册的逆序调用。
+   * 监听器抛出的异常会导致任务失败。
    */
   def addTaskCompletionListener(listener: TaskCompletionListener): TaskContext
 
   /**
-   * Adds a listener in the form of a Scala closure to be executed on task completion.
-   * This will be called in all situations - success, failure, or cancellation. Adding a listener
-   * to an already completed task will result in that listener being called immediately.
-   *
-   * An example use is for HadoopRDD to register a callback to close the input stream.
-   *
-   * Exceptions thrown by the listener will result in failure of the task.
+   * 添加任务完成监听器（Scala闭包版本）。
+   * 在所有情况下都会被调用——成功、失败或取消。
    */
   def addTaskCompletionListener[U](f: (TaskContext) => U): TaskContext = {
-    // Note that due to this scala bug: https://github.com/scala/bug/issues/11016, we need to make
-    // this function polymorphic for every scala version >= 2.12, otherwise an overloaded method
-    // resolution error occurs at compile time.
     addTaskCompletionListener(new TaskCompletionListener {
       override def onTaskCompletion(context: TaskContext): Unit = f(context)
     })
   }
 
   /**
-   * Adds a listener to be executed on task failure (which includes completion listener failure, if
-   * the task body did not already fail). Adding a listener to an already failed task will result in
-   * that listener being called immediately.
-   *
-   * Note: Prior to Spark 3.4.0, failure listeners were only invoked if the main task body failed.
+   * 添加任务失败监听器。在任务失败时调用（包括完成监听器失败的情况）。
+   * 对已失败的任务添加监听器会导致该监听器立即被调用。
    */
   def addTaskFailureListener(listener: TaskFailureListener): TaskContext
 
   /**
-   * Adds a listener to be executed on task failure (which includes completion listener failure, if
-   * the task body did not already fail). Adding a listener to an already failed task will result in
-   * that listener being called immediately.
-   *
-   * Note: Prior to Spark 3.4.0, failure listeners were only invoked if the main task body failed.
+   * 添加任务失败监听器（Scala闭包版本）。
    */
   def addTaskFailureListener(f: (TaskContext, Throwable) => Unit): TaskContext = {
     addTaskFailureListener(new TaskFailureListener {
@@ -169,18 +125,20 @@ abstract class TaskContext extends Serializable {
     })
   }
 
-  /** Runs a task with this context, ensuring failure and completion listeners get triggered. */
+  /**
+   * 使用此上下文运行任务，确保失败和完成监听器被正确触发。
+   * 如果任务在启动前就已被标记为中断，先杀死任务再执行。
+   * 异常处理：先触发失败回调，再触发完成回调，最后重新抛出异常。
+   */
   private[spark] def runTaskWithListeners[T](task: Task[T]): T = {
     try {
-      // SPARK-44818 - Its possible that taskThread has not been initialized when kill is initially
-      // called with interruptThread=true. We do set the reason and eventually will set it on the
-      // context too within run(). If that's the case, kill the thread before it starts executing
-      // the actual task.
+      // SPARK-44818: 可能在kill最初被调用时taskThread还未初始化。
+      // 在实际执行任务之前检查并中断。
       killTaskIfInterrupted()
       task.runTask(this)
     } catch {
       case e: Throwable =>
-        // Catch all errors; run task failure and completion callbacks, and rethrow the exception.
+        // 捕获所有异常，运行失败和完成回调后重新抛出
         try {
           markTaskFailed(e)
         } catch {
@@ -195,146 +153,94 @@ abstract class TaskContext extends Serializable {
         }
         throw e
     } finally {
-      // Call the task completion callbacks. No-op if "markTaskCompleted" was already called.
+      // 调用任务完成回调。如果markTaskCompleted已经被调用过则为空操作。
       markTaskCompleted(None)
     }
   }
 
-  /**
-   * The ID of the stage that this task belong to.
-   */
+  /** 该任务所属的Stage ID */
   def stageId(): Int
 
-  /**
-   * How many times the stage that this task belongs to has been attempted. The first stage attempt
-   * will be assigned stageAttemptNumber = 0, and subsequent attempts will have increasing attempt
-   * numbers.
-   */
+  /** 该任务所属Stage的尝试次数，首次尝试为0 */
   def stageAttemptNumber(): Int
 
-  /**
-   * The ID of the RDD partition that is computed by this task.
-   */
+  /** 该任务计算的RDD分区ID */
   def partitionId(): Int
 
-  /**
-   * Total number of partitions in the stage that this task belongs to.
-   */
+  /** 该任务所属Stage的总分区数 */
   def numPartitions(): Int
 
-  /**
-   * How many times this task has been attempted.  The first task attempt will be assigned
-   * attemptNumber = 0, and subsequent attempts will have increasing attempt numbers.
-   */
+  /** 该任务的尝试次数，首次尝试为0 */
   def attemptNumber(): Int
 
-  /**
-   * An ID that is unique to this task attempt (within the same SparkContext, no two task attempts
-   * will share the same attempt ID).  This is roughly equivalent to Hadoop's TaskAttemptID.
-   */
+  /** 该任务尝试的唯一ID（同一SparkContext内不会重复），类似Hadoop的TaskAttemptID */
   def taskAttemptId(): Long
 
-  /**
-   * Get a local property set upstream in the driver, or null if it is missing. See also
-   * `org.apache.spark.SparkContext.setLocalProperty`.
-   */
+  /** 获取Driver端设置的本地属性值，不存在时返回null */
   def getLocalProperty(key: String): String
 
-  /**
-   * CPUs allocated to the task.
-   */
+  /** 分配给该任务的CPU核心数 */
   @Since("3.3.0")
   def cpus(): Int
 
-  /**
-   * Resources allocated to the task. The key is the resource name and the value is information
-   * about the resource. Please refer to [[org.apache.spark.resource.ResourceInformation]] for
-   * specifics.
-   */
+  /** 分配给该任务的资源信息Map，键为资源名称 */
   @Evolving
   def resources(): Map[String, ResourceInformation]
 
-  /**
-   * (java-specific) Resources allocated to the task. The key is the resource name and the value
-   * is information about the resource. Please refer to
-   * [[org.apache.spark.resource.ResourceInformation]] for specifics.
-   */
+  /** 分配给该任务的资源信息Map（Java版本） */
   @Evolving
   def resourcesJMap(): java.util.Map[String, ResourceInformation]
 
+  /** 获取任务指标 */
   @DeveloperApi
   def taskMetrics(): TaskMetrics
 
-  /**
-   * ::DeveloperApi::
-   * Returns all metrics sources with the given name which are associated with the instance
-   * which runs the task. For more information see `org.apache.spark.metrics.MetricsSystem`.
-   */
+  /** 获取与运行该任务的实例关联的指定名称的所有指标源 */
   @DeveloperApi
   def getMetricsSources(sourceName: String): Seq[Source]
 
-  /**
-   * If the task is interrupted, throws TaskKilledException with the reason for the interrupt.
-   */
+  /** 如果任务被中断，抛出TaskKilledException并附带中断原因 */
   private[spark] def killTaskIfInterrupted(): Unit
 
-  /**
-   * If the task is interrupted, the reason this task was killed, otherwise None.
-   */
+  /** 如果任务被中断则返回中断原因，否则返回None */
   private[spark] def getKillReason(): Option[String]
 
-  /**
-   * Returns the manager for this task's managed memory.
-   */
+  /** 获取该任务的托管内存管理器 */
   private[spark] def taskMemoryManager(): TaskMemoryManager
 
-  /**
-   * Register an accumulator that belongs to this task. Accumulators must call this method when
-   * deserializing in executors.
-   */
+  /** 注册属于该任务的累加器。累加器在Executor端反序列化时必须调用此方法 */
   private[spark] def registerAccumulator(a: AccumulatorV2[_, _]): Unit
 
-  /**
-   * Record that this task has failed due to a fetch failure from a remote host.  This allows
-   * fetch-failure handling to get triggered by the driver, regardless of intervening user-code.
-   */
+  /** 记录任务因远程主机的Fetch失败而失败，触发Driver端的fetch-failure处理 */
   private[spark] def setFetchFailed(fetchFailed: FetchFailedException): Unit
 
-  /** Marks the task for interruption, i.e. cancellation. */
+  /** 标记任务为中断（即取消） */
   private[spark] def markInterrupted(reason: String): Unit
 
-  /** Marks the task as failed and triggers the failure listeners. */
+  /** 标记任务为失败并触发失败监听器 */
   private[spark] def markTaskFailed(error: Throwable): Unit
 
-  /** Marks the task as completed and triggers the completion listeners. */
+  /** 标记任务为完成并触发完成监听器 */
   private[spark] def markTaskCompleted(error: Option[Throwable]): Unit
 
-  /** If the task fails, the exception that caused it, otherwise None. */
+  /** 如果任务失败，返回导致失败的异常 */
   private[spark] def getTaskFailure: Option[Throwable] = None
 
-  /** Optionally returns the stored fetch failure in the task. */
+  /** 返回任务中存储的FetchFailedException（如果有） */
   private[spark] def fetchFailed: Option[FetchFailedException]
 
-  /** Gets local properties set upstream in the driver. */
+  /** 获取Driver端设置的本地属性集合 */
   private[spark] def getLocalProperties: Properties
 
-  /** Whether the current task is allowed to interrupt. */
+  /** 当前任务是否允许被中断 */
   private[spark] def interruptible(): Boolean
 
-  /**
-   * Pending the interruption request until the task is able to
-   * interrupt after creating the resource uninterruptibly.
-   */
+  /** 挂起中断请求，直到任务能够在不可中断地创建资源后进行中断 */
   private[spark] def pendingInterrupt(threadToInterrupt: Option[Thread], reason: String): Unit
 
   /**
-   * Creating a closeable resource uninterruptibly. A task is not allowed to interrupt in this
-   * state until the resource creation finishes. E.g.,
-   * {{{
-   *  val linesReader = TaskContext.get().createResourceUninterruptibly {
-   *    new HadoopFileLinesReader(file, parser.options.lineSeparatorInRead, conf)
-   *  }
-   * }}}
+   * 不可中断地创建可关闭资源。任务在此状态下不允许被中断，
+   * 直到资源创建完成。用于保护资源初始化过程不被打断。
    */
   private[spark] def createResourceUninterruptibly[T <: Closeable](resourceBuilder: => T): T
 }

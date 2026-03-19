@@ -35,220 +35,130 @@ import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.util.ArrayImplicits._
 import org.apache.spark.util.Utils
 
+/**
+ * 只读Spark配置接口，提供各种类型参数的获取方法。
+ * 支持字符串、时间（秒/毫秒）、大小（字节/KB/MB/GB）、整数、长整数、浮点数、布尔值等类型。
+ */
 trait ReadOnlySparkConf {
-  /** Get a parameter; throws a NoSuchElementException if it's not set */
+  /** 获取配置参数，未设置时抛出NoSuchElementException */
   def get(key: String): String = {
     getOption(key).getOrElse(throw new NoSuchElementException(key))
   }
 
-  /** Get a parameter, falling back to a default if not set */
+  /** 获取配置参数，未设置时返回默认值 */
   def get(key: String, defaultValue: String): String = {
     getOption(key).getOrElse(defaultValue)
   }
 
-  /**
-   * Retrieves the value of a pre-defined configuration entry.
-   *
-   * - This is an internal Spark API.
-   * - The return type if defined by the configuration entry.
-   * - This will throw an exception is the config is not optional and the value is not set.
-   */
+  /** 获取预定义配置条目的值（Spark内部API），返回类型由ConfigEntry定义 */
   private[spark] def get[T](entry: ConfigEntry[T]): T
 
-  /**
-   * Get a time parameter as seconds; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then seconds are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the time parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as seconds
-   */
+  /** 获取时间参数（秒），未设置时抛异常。无后缀时默认为秒 */
   def getTimeAsSeconds(key: String): Long = catchIllegalValue(key) {
     Utils.timeStringAsSeconds(get(key))
   }
 
-  /**
-   * Get a time parameter as seconds, falling back to a default if not set. If no
-   * suffix is provided then seconds are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as seconds
-   */
+  /** 获取时间参数（秒），未设置时使用默认值 */
   def getTimeAsSeconds(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.timeStringAsSeconds(get(key, defaultValue))
   }
 
-  /**
-   * Get a time parameter as milliseconds; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then milliseconds are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the time parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as milliseconds
-   */
+  /** 获取时间参数（毫秒），未设置时抛异常。无后缀时默认为毫秒 */
   def getTimeAsMs(key: String): Long = catchIllegalValue(key) {
     Utils.timeStringAsMs(get(key))
   }
 
-  /**
-   * Get a time parameter as milliseconds, falling back to a default if not set. If no
-   * suffix is provided then milliseconds are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as milliseconds
-   */
+  /** 获取时间参数（毫秒），未设置时使用默认值 */
   def getTimeAsMs(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.timeStringAsMs(get(key, defaultValue))
   }
 
-  /**
-   * Get a size parameter as bytes; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then bytes are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the size parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as bytes
-   */
+  /** 获取大小参数（字节），未设置时抛异常 */
   def getSizeAsBytes(key: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsBytes(get(key))
   }
 
-  /**
-   * Get a size parameter as bytes, falling back to a default if not set. If no
-   * suffix is provided then bytes are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as bytes
-   */
+  /** 获取大小参数（字节），未设置时使用字符串默认值 */
   def getSizeAsBytes(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsBytes(get(key, defaultValue))
   }
 
-  /**
-   * Get a size parameter as bytes, falling back to a default if not set.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as bytes
-   */
+  /** 获取大小参数（字节），未设置时使用长整数默认值 */
   def getSizeAsBytes(key: String, defaultValue: Long): Long = catchIllegalValue(key) {
     Utils.byteStringAsBytes(get(key, s"${defaultValue}B"))
   }
 
-  /**
-   * Get a size parameter as Kibibytes; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then Kibibytes are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the size parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as Kibibytes
-   */
+  /** 获取大小参数（KB），未设置时抛异常 */
   def getSizeAsKb(key: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsKb(get(key))
   }
 
-  /**
-   * Get a size parameter as Kibibytes, falling back to a default if not set. If no
-   * suffix is provided then Kibibytes are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as Kibibytes
-   */
+  /** 获取大小参数（KB），未设置时使用默认值 */
   def getSizeAsKb(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsKb(get(key, defaultValue))
   }
 
-  /**
-   * Get a size parameter as Mebibytes; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then Mebibytes are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the size parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as Mebibytes
-   */
+  /** 获取大小参数（MB），未设置时抛异常 */
   def getSizeAsMb(key: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsMb(get(key))
   }
 
-  /**
-   * Get a size parameter as Mebibytes, falling back to a default if not set. If no
-   * suffix is provided then Mebibytes are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as Mebibytes
-   */
+  /** 获取大小参数（MB），未设置时使用默认值 */
   def getSizeAsMb(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsMb(get(key, defaultValue))
   }
 
-  /**
-   * Get a size parameter as Gibibytes; throws a NoSuchElementException if it's not set. If no
-   * suffix is provided then Gibibytes are assumed.
-   *
-   * @throws java.util.NoSuchElementException If the size parameter is not set
-   * @throws NumberFormatException            If the value cannot be interpreted as Gibibytes
-   */
+  /** 获取大小参数（GB），未设置时抛异常 */
   def getSizeAsGb(key: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsGb(get(key))
   }
 
-  /**
-   * Get a size parameter as Gibibytes, falling back to a default if not set. If no
-   * suffix is provided then Gibibytes are assumed.
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as Gibibytes
-   */
+  /** 获取大小参数（GB），未设置时使用默认值 */
   def getSizeAsGb(key: String, defaultValue: String): Long = catchIllegalValue(key) {
     Utils.byteStringAsGb(get(key, defaultValue))
   }
 
-  /** Get a parameter as an Option */
+  /** 获取参数值，以Option形式返回 */
   def getOption(key: String): Option[String]
 
-  /** Get all parameters as a list of pairs */
+  /** 获取所有参数，返回键值对数组 */
   def getAll: Array[(String, String)]
 
-  /**
-   * Get a parameter as an integer, falling back to a default if not set
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as an integer
-   */
+  /** 获取整数参数，未设置时使用默认值 */
   def getInt(key: String, defaultValue: Int): Int = catchIllegalValue(key) {
     getOption(key).map(_.toInt).getOrElse(defaultValue)
   }
 
-  /**
-   * Get a parameter as a long, falling back to a default if not set
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as a long
-   */
+  /** 获取长整数参数，未设置时使用默认值 */
   def getLong(key: String, defaultValue: Long): Long = catchIllegalValue(key) {
     getOption(key).map(_.toLong).getOrElse(defaultValue)
   }
 
-  /**
-   * Get a parameter as a double, falling back to a default if not ste
-   *
-   * @throws NumberFormatException If the value cannot be interpreted as a double
-   */
+  /** 获取双精度浮点数参数，未设置时使用默认值 */
   def getDouble(key: String, defaultValue: Double): Double = catchIllegalValue(key) {
     getOption(key).map(_.toDouble).getOrElse(defaultValue)
   }
 
-  /**
-   * Get a parameter as a boolean, falling back to a default if not set
-   *
-   * @throws IllegalArgumentException If the value cannot be interpreted as a boolean
-   */
+  /** 获取布尔参数，未设置时使用默认值 */
   def getBoolean(key: String, defaultValue: Boolean): Boolean = catchIllegalValue(key) {
     getOption(key).map(_.toBoolean).getOrElse(defaultValue)
   }
 
-  /** Does the configuration contain a given parameter? */
+  /** 检查配置中是否包含指定的键 */
   def contains(key: String): Boolean
 
-  /** Does the configuration have the typed config entry? */
+  /** 检查配置中是否包含指定的ConfigEntry */
   def contains(entry: ConfigEntry[_]): Boolean = contains(entry.key)
 
   /**
-   * Wrapper method for get() methods which require some specific value format. This catches
-   * any [[NumberFormatException]] or [[IllegalArgumentException]] and re-raises it with the
-   * incorrectly configured key in the exception message.
+   * 值格式转换的包装方法：捕获NumberFormatException和IllegalArgumentException，
+   * 在异常消息中附带出错的配置键名以便调试
    */
   protected def catchIllegalValue[T](key: String)(getValue: => T): T = {
     try {
       getValue
     } catch {
       case e: NumberFormatException =>
-        // NumberFormatException doesn't have a constructor that takes a cause for some reason.
         throw new NumberFormatException(s"Illegal value for config key $key: ${e.getMessage}")
           .initCause(e)
       case e: IllegalArgumentException =>
@@ -256,30 +166,22 @@ trait ReadOnlySparkConf {
     }
   }
 
-  /**
-   * By using this instead of System.getenv(), environment variables can be mocked
-   * in unit tests.
-   */
+  /** 获取环境变量的包装方法，便于在单元测试中mock */
   private[spark] def getenv(name: String): String = System.getenv(name)
 }
 
 /**
- * Configuration for a Spark application. Used to set various Spark parameters as key-value pairs.
+ * Spark应用程序的配置类，以键值对形式设置各种Spark参数。
  *
- * Most of the time, you would create a SparkConf object with `new SparkConf()`, which will load
- * values from any `spark.*` Java system properties set in your application as well. In this case,
- * parameters you set directly on the `SparkConf` object take priority over system properties.
+ * 通常使用`new SparkConf()`创建，会自动加载应用中以`spark.*`开头的Java系统属性。
+ * 直接在SparkConf对象上设置的参数优先级高于系统属性。
+ * 单元测试中可用`new SparkConf(false)`跳过加载外部配置。
  *
- * For unit tests, you can also call `new SparkConf(false)` to skip loading external settings and
- * get the same configuration no matter what the system properties are.
+ * 所有setter方法支持链式调用，如`new SparkConf().setMaster("local").setAppName("My app")`。
  *
- * All setter methods in this class support chaining. For example, you can write
- * `new SparkConf().setMaster("local").setAppName("My app")`.
+ * @param loadDefaults 是否从Java系统属性中加载配置
  *
- * @param loadDefaults whether to also load values from Java system properties
- *
- * @note Once a SparkConf object is passed to Spark, it is cloned and can no longer be modified
- * by the user. Spark does not support modifying the configuration at runtime.
+ * @note SparkConf传递给Spark后会被克隆且不可再修改。Spark不支持运行时修改配置。
  */
 class SparkConf(loadDefaults: Boolean)
     extends ReadOnlySparkConf
@@ -289,34 +191,37 @@ class SparkConf(loadDefaults: Boolean)
 
   import SparkConf._
 
-  /** Create a SparkConf that loads defaults from system properties and the classpath */
+  /** 使用默认参数创建SparkConf（加载系统属性和classpath中的配置） */
   def this() = this(true)
 
   private val settings = new ConcurrentHashMap[String, String]()
 
+  // 延迟初始化ConfigReader，绑定环境变量提供者用于配置值中的变量替换
   @transient private lazy val reader: ConfigReader = {
     val _reader = new ConfigReader(new SparkConfigProvider(settings))
     _reader.bindEnv((key: String) => Option(getenv(key)))
     _reader
   }
 
+  // 如果loadDefaults为true，从系统属性中加载所有spark.*开头的配置
   if (loadDefaults) {
     loadFromSystemProperties(false)
   }
 
+  /** 从系统属性中加载所有spark.*开头的配置到当前SparkConf */
   private[spark] def loadFromSystemProperties(silent: Boolean): SparkConf = {
-    // Load any spark.* system properties
     for ((key, value) <- Utils.getSystemProperties if key.startsWith("spark.")) {
       set(key, value, silent)
     }
     this
   }
 
-  /** Set a configuration variable. */
+  /** 设置一个配置键值对 */
   def set(key: String, value: String): SparkConf = {
     set(key, value, false)
   }
 
+  /** 内部set方法：校验key/value非null，可选地记录已废弃配置的警告 */
   private[spark] def set(key: String, value: String, silent: Boolean): SparkConf = {
     if (key == null) {
       throw new NullPointerException("null key")
@@ -331,54 +236,45 @@ class SparkConf(loadDefaults: Boolean)
     this
   }
 
+  /** 通过ConfigEntry设置配置值，使用ConfigEntry的字符串转换器 */
   private[spark] def set[T](entry: ConfigEntry[T], value: T): SparkConf = {
     set(entry.key, entry.stringConverter(value))
     this
   }
 
+  /** 通过OptionalConfigEntry设置配置值 */
   private[spark] def set[T](entry: OptionalConfigEntry[T], value: T): SparkConf = {
     set(entry.key, entry.rawStringConverter(value))
     this
   }
 
-  /**
-   * The master URL to connect to, such as "local" to run locally with one thread, "local[4]" to
-   * run locally with 4 cores, or "spark://master:7077" to run on a Spark standalone cluster.
-   */
+  /** 设置Master URL，如"local"本地单线程、"local[4]"本地4核、"spark://master:7077"集群模式 */
   def setMaster(master: String): SparkConf = {
     set("spark.master", master)
   }
 
-  /** Set a name for your application. Shown in the Spark web UI. */
+  /** 设置应用名称，将显示在Spark Web UI中 */
   def setAppName(name: String): SparkConf = {
     set("spark.app.name", name)
   }
 
-  /** Set JAR files to distribute to the cluster. */
+  /** 设置需要分发到集群的JAR文件列表 */
   def setJars(jars: Seq[String]): SparkConf = {
     for (jar <- jars if (jar == null)) logWarning("null jar passed to SparkContext constructor")
     set(JARS, jars.filter(_ != null))
   }
 
-  /** Set JAR files to distribute to the cluster. (Java-friendly version.) */
+  /** 设置需要分发到集群的JAR文件列表（Java友好版本） */
   def setJars(jars: Array[String]): SparkConf = {
     setJars(jars.toImmutableArraySeq)
   }
 
-  /**
-   * Set an environment variable to be used when launching executors for this application.
-   * These variables are stored as properties of the form spark.executorEnv.VAR_NAME
-   * (for example spark.executorEnv.PATH) but this method makes them easier to set.
-   */
+  /** 设置Executor启动时的环境变量，存储为spark.executorEnv.VAR_NAME格式 */
   def setExecutorEnv(variable: String, value: String): SparkConf = {
     set("spark.executorEnv." + variable, value)
   }
 
-  /**
-   * Set multiple environment variables to be used when launching executors.
-   * These variables are stored as properties of the form spark.executorEnv.VAR_NAME
-   * (for example spark.executorEnv.PATH) but this method makes them easier to set.
-   */
+  /** 批量设置Executor环境变量 */
   def setExecutorEnv(variables: Seq[(String, String)]): SparkConf = {
     for ((k, v) <- variables) {
       setExecutorEnv(k, v)
@@ -386,28 +282,23 @@ class SparkConf(loadDefaults: Boolean)
     this
   }
 
-  /**
-   * Set multiple environment variables to be used when launching executors.
-   * (Java-friendly version.)
-   */
+  /** 批量设置Executor环境变量（Java友好版本） */
   def setExecutorEnv(variables: Array[(String, String)]): SparkConf = {
     setExecutorEnv(variables.toImmutableArraySeq)
   }
 
-  /**
-   * Set the location where Spark is installed on worker nodes.
-   */
+  /** 设置Worker节点上Spark的安装路径 */
   def setSparkHome(home: String): SparkConf = {
     set("spark.home", home)
   }
 
-  /** Set multiple parameters together */
+  /** 批量设置多个参数 */
   def setAll(settings: Iterable[(String, String)]): SparkConf = {
     settings.foreach { case (k, v) => set(k, v) }
     this
   }
 
-  /** Set a parameter if it isn't already configured */
+  /** 仅在参数尚未配置时设置（不覆盖已有值） */
   def setIfMissing(key: String, value: String): SparkConf = {
     if (settings.putIfAbsent(key, value) == null) {
       logDeprecationWarning(key)
@@ -415,6 +306,7 @@ class SparkConf(loadDefaults: Boolean)
     this
   }
 
+  /** 通过ConfigEntry设置配置值（仅在未配置时） */
   private[spark] def setIfMissing[T](entry: ConfigEntry[T], value: T): SparkConf = {
     if (settings.putIfAbsent(entry.key, entry.stringConverter(value)) == null) {
       logDeprecationWarning(entry.key)
@@ -422,6 +314,7 @@ class SparkConf(loadDefaults: Boolean)
     this
   }
 
+  /** 通过OptionalConfigEntry设置配置值（仅在未配置时） */
   private[spark] def setIfMissing[T](entry: OptionalConfigEntry[T], value: T): SparkConf = {
     if (settings.putIfAbsent(entry.key, entry.rawStringConverter(value)) == null) {
       logDeprecationWarning(entry.key)
@@ -430,26 +323,26 @@ class SparkConf(loadDefaults: Boolean)
   }
 
   /**
-   * Use Kryo serialization and register the given set of classes with Kryo.
-   * If called multiple times, this will append the classes from all calls together.
+   * 使用Kryo序列化并注册指定的类。
+   * 多次调用会追加而非覆盖之前注册的类。
    */
   def registerKryoClasses(classes: Array[Class[_]]): SparkConf = {
     val allClassNames = new LinkedHashSet[String]()
+    // 获取已注册的类名
     allClassNames ++= get(KRYO_CLASSES_TO_REGISTER).map(_.trim)
       .filter(!_.isEmpty)
+    // 追加新的类名
     allClassNames ++= classes.map(_.getName)
 
     set(KRYO_CLASSES_TO_REGISTER, allClassNames.toSeq)
+    // 同时设置序列化器为KryoSerializer
     set(SERIALIZER, classOf[KryoSerializer].getName)
     this
   }
 
   private final val avroNamespace = "avro.schema."
 
-  /**
-   * Use Kryo serialization and register the given set of Avro schemas so that the generic
-   * record serializer can decrease network IO
-   */
+  /** 注册Avro Schema以便通用记录序列化器减少网络IO。Schema以指纹作为键存储 */
   def registerAvroSchemas(schemas: Schema*): SparkConf = {
     for (schema <- schemas) {
       set(avroNamespace + SchemaNormalization.parsingFingerprint64(schema), schema.toString)
@@ -457,83 +350,71 @@ class SparkConf(loadDefaults: Boolean)
     this
   }
 
-  /** Gets all the avro schemas in the configuration used in the generic Avro record serializer */
+  /** 获取配置中所有注册的Avro Schema，返回Map[指纹ID -> Schema字符串] */
   def getAvroSchema: Map[Long, String] = {
     getAll.filter { case (k, v) => k.startsWith(avroNamespace) }
       .map { case (k, v) => (k.substring(avroNamespace.length).toLong, v) }
       .toMap
   }
 
-  /** Remove a parameter from the configuration */
+  /** 从配置中移除指定的参数 */
   def remove(key: String): SparkConf = {
     settings.remove(key)
     this
   }
 
+  /** 通过ConfigEntry移除配置参数 */
   private[spark] def remove(entry: ConfigEntry[_]): SparkConf = {
     remove(entry.key)
   }
 
-  /**
-   * Retrieves the value of a pre-defined configuration entry.
-   *
-   * - This is an internal Spark API.
-   * - The return type if defined by the configuration entry.
-   * - This will throw an exception is the config is not optional and the value is not set.
-   */
+  /** 通过ConfigReader获取预定义配置条目的值 */
   private[spark] def get[T](entry: ConfigEntry[T]): T = {
     entry.readFrom(reader)
   }
 
-  /** Get a parameter as an Option */
+  /** 获取配置参数值，同时检查已废弃的配置键名 */
   def getOption(key: String): Option[String] = {
     Option(settings.get(key)).orElse(getDeprecatedConfig(key, settings))
   }
 
-  /** Get an optional value, applying variable substitution. */
+  /** 获取配置参数值并进行变量替换 */
   private[spark] def getWithSubstitution(key: String): Option[String] = {
     getOption(key).map(reader.substitute)
   }
 
-  /** Get all parameters as a list of pairs */
+  /** 获取所有配置参数，返回键值对数组 */
   def getAll: Array[(String, String)] = {
     settings.entrySet().asScala.map(x => (x.getKey, x.getValue)).toArray
   }
 
-  /**
-   * Get all parameters that start with `prefix`
-   */
+  /** 获取所有以指定前缀开头的参数，返回时去除前缀 */
   def getAllWithPrefix(prefix: String): Array[(String, String)] = {
     getAll.filter { case (k, v) => k.startsWith(prefix) }
       .map { case (k, v) => (k.substring(prefix.length), v) }
   }
 
-  /**
-   * Get all parameters that start with `prefix` and apply f.
-   */
+  /** 获取所有以指定前缀开头的参数，并对键应用转换函数f */
   def getAllWithPrefix[K](prefix: String, f: String => K): Array[(K, String)] = {
     getAll.filter { case (k, _) => k.startsWith(prefix) }
       .map { case (k, v) => (f(k), v) }
   }
 
-  /** Get all executor environment variables set on this SparkConf */
+  /** 获取所有Executor环境变量配置（spark.executorEnv.*前缀） */
   def getExecutorEnv: Seq[(String, String)] = {
     getAllWithPrefix("spark.executorEnv.").toImmutableArraySeq
   }
 
-  /**
-   * Returns the Spark application id, valid in the Driver after TaskScheduler registration and
-   * from the start in the Executor.
-   */
+  /** 获取Spark应用ID，Driver端在TaskScheduler注册后有效，Executor端从启动时就有效 */
   def getAppId: String = get("spark.app.id")
 
-  /** Does the configuration contain a given parameter? */
+  /** 检查是否包含指定配置键，同时检查该键的所有替代键名 */
   def contains(key: String): Boolean = {
     settings.containsKey(key) ||
       configsWithAlternatives.get(key).toSeq.flatten.exists { alt => contains(alt.key) }
   }
 
-  /** Copy this object */
+  /** 克隆当前SparkConf对象，创建一个新的独立副本 */
   override def clone: SparkConf = {
     val cloned = new SparkConf(false)
     settings.entrySet().asScala.foreach { e =>
@@ -543,10 +424,11 @@ class SparkConf(loadDefaults: Boolean)
   }
 
   /**
-   * Checks for illegal or deprecated config settings. Throws an exception for the former. Not
-   * idempotent - may mutate this conf object to convert deprecated settings to supported ones.
+   * 校验配置的合法性。检查非法或已废弃的配置项，对非法项抛异常。
+   * 非幂等方法——可能会将废弃的配置转换为新的配置项。
    */
   private[spark] def validateSettings(): Unit = {
+    // 警告spark.local.dir将被集群管理器覆盖
     if (contains("spark.local.dir")) {
       val msg = "Note that spark.local.dir will be overridden by the value set by " +
         "the cluster manager (via SPARK_LOCAL_DIRS in standalone/kubernetes and LOCAL_DIRS" +
@@ -554,7 +436,7 @@ class SparkConf(loadDefaults: Boolean)
       logWarning(msg)
     }
 
-    // Used by Yarn in 1.1 and before
+    // 检查Spark 1.1及之前版本使用的废弃配置
     sys.props.get("spark.driver.libraryPath").foreach { value =>
       val warning =
         log"""
@@ -566,7 +448,7 @@ class SparkConf(loadDefaults: Boolean)
       logWarning(warning)
     }
 
-    // Validate spark.executor.extraJavaOptions
+    // 校验Executor的Java选项：不允许包含-Dspark（应通过SparkConf设置）和-Xmx（应通过spark.executor.memory设置）
     Seq(EXECUTOR_JAVA_OPTIONS.key, "spark.executor.defaultJavaOptions").foreach { executorOptsKey =>
       getOption(executorOptsKey).foreach { javaOpts =>
         if (javaOpts.contains("-Dspark")) {
@@ -584,7 +466,7 @@ class SparkConf(loadDefaults: Boolean)
       }
     }
 
-    // Validate memory fractions
+    // 校验内存比例参数必须在0到1之间
     for (key <- Seq(MEMORY_FRACTION.key, MEMORY_STORAGE_FRACTION.key)) {
       val value = getDouble(key, 0.5)
       if (value > 1 || value < 0) {
@@ -598,6 +480,7 @@ class SparkConf(loadDefaults: Boolean)
           "memoryFractionValue" -> value.toString))
     }
 
+    // 校验部署模式必须是cluster或client
     if (contains(SUBMIT_DEPLOY_MODE)) {
       get(SUBMIT_DEPLOY_MODE) match {
         case "cluster" | "client" =>
@@ -608,6 +491,7 @@ class SparkConf(loadDefaults: Boolean)
       }
     }
 
+    // 校验总核心数是否能被每个Executor的核心数整除，不能整除时警告剩余核心不会被分配
     if (contains(CORES_MAX) && contains(EXECUTOR_CORES)) {
       val totalCores = getInt(CORES_MAX.key, 1)
       val executorCores = get(EXECUTOR_CORES)
@@ -623,16 +507,16 @@ class SparkConf(loadDefaults: Boolean)
       }
     }
 
+    // 如果启用了加密，则必须同时启用网络认证
     val encryptionEnabled = get(NETWORK_CRYPTO_ENABLED) || get(SASL_ENCRYPTION_ENABLED)
     SparkException.require(
       !encryptionEnabled || get(NETWORK_AUTH_ENABLED),
       errorClass = "INVALID_SPARK_CONFIG.NETWORK_AUTH_MUST_BE_ENABLED",
       messageParameters = Map("networkAuthEnabledConf" -> NETWORK_AUTH_ENABLED.key))
 
+    // SPARK-22754: 心跳间隔必须小于网络超时时间，否则几乎总是导致ExecutorLostFailure
     val executorTimeoutThresholdMs = get(NETWORK_TIMEOUT) * 1000
     val executorHeartbeatIntervalMs = get(EXECUTOR_HEARTBEAT_INTERVAL)
-    // If spark.executor.heartbeatInterval bigger than spark.network.timeout,
-    // it will almost always cause ExecutorLostFailure. See SPARK-22754.
     SparkException.require(
       executorTimeoutThresholdMs > executorHeartbeatIntervalMs,
       errorClass = "INVALID_SPARK_CONFIG.INVALID_EXECUTOR_HEARTBEAT_INTERVAL",
@@ -643,24 +527,19 @@ class SparkConf(loadDefaults: Boolean)
         "executorHeartbeatIntervalValue" -> executorHeartbeatIntervalMs.toString))
   }
 
-  /**
-   * Return a string listing all keys and values, one per line. This is useful to print the
-   * configuration out for debugging.
-   */
+  /** 返回所有配置的调试字符串，每行一个键值对，敏感信息会被脱敏 */
   def toDebugString: String = {
     Utils.redact(this, getAll).sorted.map { case (k, v) => k + "=" + v }.mkString("\n")
   }
 
 }
 
+/**
+ * SparkConf伴生对象，管理已废弃配置项的映射和配置键的备用名称。
+ */
 private[spark] object SparkConf extends Logging {
 
-  /**
-   * Maps deprecated config keys to information about the deprecation.
-   *
-   * The extra information is logged as a warning when the config is present in the user's
-   * configuration.
-   */
+  /** 已废弃配置键到废弃信息的映射表。当用户配置中出现这些键时会记录警告日志 */
   private val deprecatedConfigs: Map[String, DeprecatedConfig] = {
     val configs = Seq(
       DeprecatedConfig("spark.cache.class", "0.8",
@@ -730,12 +609,8 @@ private[spark] object SparkConf extends Logging {
   }
 
   /**
-   * Maps a current config key to alternate keys that were used in previous version of Spark.
-   *
-   * The alternates are used in the order defined in this map. If deprecated configs are
-   * present in the user's configuration, a warning is logged.
-   *
-   * TODO: consolidate it with `ConfigBuilder.withAlternative`.
+   * 当前配置键到其历史替代键列表的映射表。
+   * 替代键按定义顺序使用。当用户配置中出现已废弃的替代键时会记录警告。
    */
   private val configsWithAlternatives = Map[String, Seq[AlternateConfig]](
     EXECUTOR_USER_CLASS_PATH_FIRST.key -> Seq(
@@ -802,10 +677,8 @@ private[spark] object SparkConf extends Logging {
   )
 
   /**
-   * A view of `configsWithAlternatives` that makes it more efficient to look up deprecated
-   * config keys.
-   *
-   * Maps the deprecated config name to a 2-tuple (new config name, alternate config info).
+   * configsWithAlternatives的反向索引，将废弃的替代键名映射到(新键名, 替代键信息)的二元组。
+   * 使查找废弃键名更高效。
    */
   private val allAlternatives: Map[String, (String, AlternateConfig)] = {
     configsWithAlternatives.keys.flatMap { key =>
@@ -814,10 +687,8 @@ private[spark] object SparkConf extends Logging {
   }
 
   /**
-   * Return whether the given config should be passed to an executor on start-up.
-   *
-   * Certain authentication configs are required from the executor when it connects to
-   * the scheduler, while the rest of the spark configs can be inherited from the driver later.
+   * 判断给定配置键是否需要在Executor启动时传递。
+   * 认证相关配置在Executor连接Scheduler时就需要，其他Spark配置可以稍后从Driver继承。
    */
   def isExecutorStartupConf(name: String): Boolean = {
     (name.startsWith("spark.auth") && name != SecurityManager.SPARK_AUTH_SECRET_CONF) ||
@@ -829,17 +700,12 @@ private[spark] object SparkConf extends Logging {
     isSparkPortConf(name)
   }
 
-  /**
-   * Return true if the given config matches either `spark.*.port` or `spark.port.*`.
-   */
+  /** 判断配置键名是否匹配Spark端口配置模式：spark.*.port 或 spark.port.* */
   def isSparkPortConf(name: String): Boolean = {
     (name.startsWith("spark.") && name.endsWith(".port")) || name.startsWith("spark.port.")
   }
 
-  /**
-   * Looks for available deprecated keys for the given config option, and return the first
-   * value available.
-   */
+  /** 查找给定配置键的已废弃替代键，返回第一个可用的值（必要时进行值转换） */
   def getDeprecatedConfig(key: String, conf: JMap[String, String]): Option[String] = {
     configsWithAlternatives.get(key).flatMap { alts =>
       alts.collectFirst { case alt if conf.containsKey(alt.key) =>
@@ -849,9 +715,7 @@ private[spark] object SparkConf extends Logging {
     }
   }
 
-  /**
-   * Logs a warning message if the given config key is deprecated.
-   */
+  /** 如果给定的配置键已废弃，记录警告日志 */
   def logDeprecationWarning(key: String): Unit = {
     deprecatedConfigs.get(key).foreach { cfg =>
       logWarning(
@@ -874,11 +738,10 @@ private[spark] object SparkConf extends Logging {
   }
 
   /**
-   * Holds information about keys that have been deprecated and do not have a replacement.
-   *
-   * @param key The deprecated key.
-   * @param version Version of Spark where key was deprecated.
-   * @param deprecationMessage Message to include in the deprecation warning.
+   * 已废弃且无替代项的配置键信息。
+   * @param key 废弃的配置键
+   * @param version 配置被废弃的Spark版本
+   * @param deprecationMessage 废弃警告信息
    */
   private case class DeprecatedConfig(
       key: String,
@@ -886,11 +749,10 @@ private[spark] object SparkConf extends Logging {
       deprecationMessage: String)
 
   /**
-   * Information about an alternate configuration key that has been deprecated.
-   *
-   * @param key The deprecated config key.
-   * @param version The Spark version in which the key was deprecated.
-   * @param translation A translation function for converting old config values into new ones.
+   * 已废弃的替代配置键信息，包含可选的值转换函数。
+   * @param key 废弃的配置键
+   * @param version 配置被废弃的Spark版本
+   * @param translation 将旧配置值转换为新配置值的转换函数（可选）
    */
   private case class AlternateConfig(
       key: String,

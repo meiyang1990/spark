@@ -52,10 +52,10 @@ import org.apache.spark.util.ArrayImplicits._
 
 /**
  * :: DeveloperApi ::
- * Holds all the runtime environment objects for a running Spark instance (either master or worker),
- * including the serializer, RpcEnv, block manager, map output tracker, etc. Currently
- * Spark code finds the SparkEnv through a global variable, so all the threads can access the same
- * SparkEnv. It can be accessed by SparkEnv.get (e.g. after creating a SparkContext).
+ * 持有运行中Spark实例（Driver或Executor）的所有运行时环境对象，
+ * 包括序列化器、RpcEnv、BlockManager、MapOutputTracker等。
+ * 当前Spark通过全局变量查找SparkEnv，所有线程可以访问同一个SparkEnv实例。
+ * 可通过SparkEnv.get获取（需在创建SparkContext之后）。
  */
 @DeveloperApi
 class SparkEnv (
@@ -72,37 +72,26 @@ class SparkEnv (
     val outputCommitCoordinator: OutputCommitCoordinator,
     val conf: SparkConf) extends Logging {
 
-  // We initialize the ShuffleManager later in SparkContext and Executor to allow
-  // user jars to define custom ShuffleManagers.
+  // ShuffleManager延迟到SparkContext和Executor中初始化，以允许用户jar定义自定义ShuffleManager
   @volatile private var _shuffleManager: ShuffleManager = _
 
-  // Latch to signal when the ShuffleManager has been initialized.
-  // Used to allow callers to wait for initialization.
+  // 用于通知ShuffleManager已初始化完成的CountDownLatch
   private val shuffleManagerInitLatch = new CountDownLatch(1)
 
+  /** 获取ShuffleManager实例 */
   def shuffleManager: ShuffleManager = _shuffleManager
 
-  /**
-   * Wait for the ShuffleManager to be initialized within the specified timeout.
-   *
-   * @param timeoutMs Maximum time to wait in milliseconds
-   * @return true if the ShuffleManager was initialized within the timeout, false otherwise
-   */
+  /** 在指定超时时间内等待ShuffleManager初始化完成 */
   private[spark] def waitForShuffleManagerInit(timeoutMs: Long): Boolean = {
     shuffleManagerInitLatch.await(timeoutMs, TimeUnit.MILLISECONDS)
   }
 
-  /**
-   * Check if the ShuffleManager has been initialized.
-   *
-   * @return true if the ShuffleManager is initialized, false otherwise
-   */
+  /** 检查ShuffleManager是否已初始化 */
   private[spark] def isShuffleManagerInitialized: Boolean = {
     _shuffleManager != null
   }
 
-  // We initialize the MemoryManager later in SparkContext after DriverPlugin is loaded
-  // to allow the plugin to overwrite executor memory configurations
+  // MemoryManager延迟到SparkContext中DriverPlugin加载后初始化，以允许插件覆盖Executor内存配置
   private var _memoryManager: MemoryManager = _
 
   def memoryManager: MemoryManager = _memoryManager
@@ -110,18 +99,13 @@ class SparkEnv (
   @volatile private[spark] var isStopped = false
 
   /**
-   * A key for PythonWorkerFactory cache.
-   * @param pythonExec The python executable to run the Python worker.
-   * @param workerModule The worker module to be called in the worker, e.g., "pyspark.worker".
-   * @param daemonModule The daemon module name to reuse the worker, e.g., "pyspark.daemon".
-   * @param envVars The environment variables for the worker.
+   * PythonWorkerFactory缓存的键，包含Python可执行文件路径、工作模块、守护模块和环境变量。
    */
   private case class PythonWorkersKey(
       pythonExec: String, workerModule: String, daemonModule: String, envVars: Map[String, String])
   private val pythonWorkers = mutable.HashMap[PythonWorkersKey, PythonWorkerFactory]()
 
-  // A general, soft-reference map for metadata needed during HadoopRDD split computation
-  // (e.g., HadoopFileRDD uses this to cache JobConfs and InputFormats).
+  // 通用的软引用缓存，用于HadoopRDD分区计算时所需的元数据（如JobConf和InputFormat）
   private[spark] val hadoopJobMetadata =
     CacheBuilder.newBuilder().maximumSize(1000).softValues().build[String, AnyRef]().asMap()
 
@@ -129,10 +113,16 @@ class SparkEnv (
 
   private[spark] var executorBackend: Option[ExecutorBackend] = None
 
+  /**
+   * 停止SparkEnv中的所有组件：Python工作进程、MapOutputTracker、ShuffleManager、
+   * BroadcastManager、BlockManager、MetricsSystem、OutputCommitCoordinator和RpcEnv。
+   * Driver端还会清理临时目录。
+   */
   private[spark] def stop(): Unit = {
 
     if (!isStopped) {
       isStopped = true
+      // 停止所有Python工作进程工厂
       pythonWorkers.values.foreach(_.stop())
       mapOutputTracker.stop()
       if (shuffleManager != null) {
@@ -143,12 +133,12 @@ class SparkEnv (
       blockManager.master.stop()
       metricsSystem.stop()
       outputCommitCoordinator.stop()
+      // 关闭RPC环境并等待终止
       rpcEnv.shutdown()
       rpcEnv.awaitTermination()
 
-      // If we only stop sc, but the driver process still run as a services then we need to delete
-      // the tmp dir, if not, it will create too many tmp dirs.
-      // We only need to delete the tmp dir create by driver
+      // 如果只是停止SparkContext但Driver进程仍作为服务运行，需要删除临时目录，
+      // 否则会创建过多的临时目录。仅Driver端需要删除。
       driverTmpDir match {
         case Some(path) =>
           try {
@@ -158,11 +148,15 @@ class SparkEnv (
               logWarning(log"Exception while deleting Spark temp dir: " +
                 log"${MDC(LogKeys.PATH, path)}", e)
           }
-        case None => // We just need to delete tmp dir created by driver, so do nothing on executor
+        case None => // Executor端无需处理
       }
     }
   }
 
+  /**
+   * 创建Python工作进程。使用工厂模式，对于相同参数组合复用同一个PythonWorkerFactory。
+   * 返回(PythonWorker, 可选的进程句柄)。
+   */
   private[spark] def createPythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -171,8 +165,10 @@ class SparkEnv (
       useDaemon: Boolean): (PythonWorker, Option[ProcessHandle]) = {
     synchronized {
       val key = PythonWorkersKey(pythonExec, workerModule, daemonModule, envVars)
+      // 获取或创建对应的PythonWorkerFactory
       val workerFactory = pythonWorkers.getOrElseUpdate(key, new PythonWorkerFactory(
           pythonExec, workerModule, daemonModule, envVars, useDaemon))
+      // 同一个工厂的useDaemon设置必须一致
       if (workerFactory.useDaemonEnabled != useDaemon) {
         throw SparkException.internalError("PythonWorkerFactory is already created with " +
           s"useDaemon = ${workerFactory.useDaemonEnabled}, but now is requested with " +
@@ -183,6 +179,7 @@ class SparkEnv (
     }
   }
 
+  /** 使用默认守护模块创建Python工作进程 */
   private[spark] def createPythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -192,6 +189,7 @@ class SparkEnv (
       pythonExec, workerModule, PythonWorkerFactory.defaultDaemonModule, envVars, useDaemon)
   }
 
+  /** 使用配置中的useDaemon设置创建Python工作进程 */
   private[spark] def createPythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -202,6 +200,7 @@ class SparkEnv (
       pythonExec, workerModule, daemonModule, envVars, useDaemon)
   }
 
+  /** 销毁指定的Python工作进程 */
   private[spark] def destroyPythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -214,6 +213,7 @@ class SparkEnv (
     }
   }
 
+  /** 使用默认守护模块销毁Python工作进程 */
   private[spark] def destroyPythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -223,6 +223,7 @@ class SparkEnv (
       pythonExec, workerModule, PythonWorkerFactory.defaultDaemonModule, envVars, worker)
   }
 
+  /** 释放Python工作进程回到池中复用 */
   private[spark] def releasePythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -235,6 +236,7 @@ class SparkEnv (
     }
   }
 
+  /** 使用默认守护模块释放Python工作进程 */
   private[spark] def releasePythonWorker(
       pythonExec: String,
       workerModule: String,
@@ -244,17 +246,19 @@ class SparkEnv (
       pythonExec, workerModule, PythonWorkerFactory.defaultDaemonModule, envVars, worker)
   }
 
+  /** 初始化ShuffleManager，只能调用一次。完成后通过countDown通知等待者。 */
   private[spark] def initializeShuffleManager(): Unit = {
     Preconditions.checkState(null == _shuffleManager,
       "Shuffle manager already initialized to %s", _shuffleManager)
     try {
       _shuffleManager = ShuffleManager.create(conf, executorId == SparkContext.DRIVER_IDENTIFIER)
     } finally {
-      // Signal that the ShuffleManager has been initialized
+      // 无论成功与否都发出初始化完成信号
       shuffleManagerInitLatch.countDown()
     }
   }
 
+  /** 初始化MemoryManager（UnifiedMemoryManager），只能调用一次 */
   private[spark] def initializeMemoryManager(numUsableCores: Int): Unit = {
     Preconditions.checkState(null == memoryManager,
       "Memory manager already initialized to %s", _memoryManager)
@@ -262,25 +266,27 @@ class SparkEnv (
   }
 }
 
+/** SparkEnv伴生对象，持有全局SparkEnv实例并提供创建Driver/Executor环境的工厂方法 */
 object SparkEnv extends Logging {
   @volatile private var env: SparkEnv = _
 
   private[spark] val driverSystemName = "sparkDriver"
   private[spark] val executorSystemName = "sparkExecutor"
 
+  /** 设置全局SparkEnv实例 */
   def set(e: SparkEnv): Unit = {
     env = e
   }
 
-  /**
-   * Returns the SparkEnv.
-   */
+  /** 获取当前全局SparkEnv实例 */
   def get: SparkEnv = {
     env
   }
 
   /**
-   * Create a SparkEnv for the driver.
+   * 为Driver端创建SparkEnv。
+   * 需要conf中已设置DRIVER_HOST_ADDRESS和DRIVER_PORT。
+   * 如果启用了IO加密则生成加密密钥。
    */
   private[spark] def createDriverEnv(
       conf: SparkConf,
@@ -294,6 +300,7 @@ object SparkEnv extends Logging {
     val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
     val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
     val port = conf.get(DRIVER_PORT)
+    // 如果启用了IO加密，创建加密密钥
     val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
       Some(CryptoStreamUtils.createKey(conf))
     } else {
@@ -314,8 +321,8 @@ object SparkEnv extends Logging {
   }
 
   /**
-   * Create a SparkEnv for an executor.
-   * In coarse-grained mode, the executor provides an RpcEnv that is already instantiated.
+   * 为Executor端创建SparkEnv。
+   * 在粗粒度模式下，Executor提供一个已实例化的RpcEnv。
    */
   private[spark] def createExecutorEnv(
       conf: SparkConf,
@@ -335,14 +342,17 @@ object SparkEnv extends Logging {
       numCores,
       ioEncryptionKey
     )
-    // Set the memory manager since it needs to be initialized explicitly
+    // Executor端需要显式初始化MemoryManager
     env.initializeMemoryManager(numCores)
     SparkEnv.set(env)
     env
   }
 
   /**
-   * Helper method to create a SparkEnv for a driver or an executor.
+   * 创建SparkEnv的核心方法，Driver和Executor共用。
+   * 按顺序创建以下组件：SecurityManager、RpcEnv、Serializer、SerializerManager、
+   * BroadcastManager、MapOutputTracker、BlockManagerMaster、BlockManager、
+   * MetricsSystem、OutputCommitCoordinator。
    */
   private def create(
       conf: SparkConf,
@@ -358,16 +368,19 @@ object SparkEnv extends Logging {
 
     val isDriver = executorId == SparkContext.DRIVER_IDENTIFIER
 
-    // Listener bus is only used on the driver
+    // 事件监听总线仅在Driver端使用
     if (isDriver) {
       assert(listenerBus != null, "Attempted to create driver SparkEnv with null listener bus!")
     }
+    // 根据角色选择不同的认证密钥文件配置
     val authSecretFileConf = if (isDriver) AUTH_SECRET_FILE_DRIVER else AUTH_SECRET_FILE_EXECUTOR
+    // 创建安全管理器
     val securityManager = new SecurityManager(conf, ioEncryptionKey, authSecretFileConf)
     if (isDriver) {
       securityManager.initializeAuth()
     }
 
+    // 如果启用了IO加密但未启用RPC加密，警告密钥会以明文传输
     ioEncryptionKey.foreach { _ =>
       if (!(securityManager.isEncryptionEnabled() || securityManager.isSslRpcEnabled())) {
         logWarning("I/O encryption enabled without RPC encryption: keys will be visible on the " +
@@ -375,22 +388,29 @@ object SparkEnv extends Logging {
       }
     }
 
+    // 创建RPC环境
     val systemName = if (isDriver) driverSystemName else executorSystemName
     val rpcEnv = RpcEnv.create(systemName, bindAddress, advertiseAddress, port.getOrElse(-1), conf,
       securityManager, numUsableCores, !isDriver)
 
-    // Figure out which port RpcEnv actually bound to in case the original port is 0 or occupied.
+    // 如果原始端口为0或被占用，获取RpcEnv实际绑定的端口并更新配置
     if (isDriver) {
       conf.set(DRIVER_PORT, rpcEnv.address.port)
     }
 
+    // 创建数据序列化器（用于RDD数据序列化）
     val serializer = Utils.instantiateSerializerFromConf[Serializer](SERIALIZER, conf, isDriver)
     logDebug(s"Using serializer: ${serializer.getClass}")
 
+    // 创建序列化管理器（管理序列化、压缩和加密）
     val serializerManager = new SerializerManager(serializer, conf, ioEncryptionKey)
 
+    // 创建闭包序列化器（用于Task闭包的序列化，固定使用JavaSerializer）
     val closureSerializer = new JavaSerializer(conf)
 
+    /**
+     * 辅助方法：Driver端注册RPC端点，Executor端查找Driver端已注册的端点引用
+     */
     def registerOrLookupEndpoint(
         name: String, endpointCreator: => RpcEndpoint):
       RpcEndpointRef = {
@@ -402,26 +422,29 @@ object SparkEnv extends Logging {
       }
     }
 
+    // 创建广播管理器
     val broadcastManager = new BroadcastManager(isDriver, conf)
 
+    // 创建MapOutputTracker：Driver端创建Master版本，Executor端创建Worker版本
     val mapOutputTracker = if (isDriver) {
       new MapOutputTrackerMaster(conf, broadcastManager, isLocal)
     } else {
       new MapOutputTrackerWorker(conf)
     }
 
-    // Have to assign trackerEndpoint after initialization as MapOutputTrackerEndpoint
-    // requires the MapOutputTracker itself
+    // MapOutputTrackerEndpoint依赖MapOutputTracker本身，所以在初始化后才能赋值
     mapOutputTracker.trackerEndpoint = registerOrLookupEndpoint(MapOutputTracker.ENDPOINT_NAME,
       new MapOutputTrackerMasterEndpoint(
         rpcEnv, mapOutputTracker.asInstanceOf[MapOutputTrackerMaster], conf))
 
+    // Driver和Executor使用不同的BlockManager端口配置
     val blockManagerPort = if (isDriver) {
       conf.get(DRIVER_BLOCK_MANAGER_PORT)
     } else {
       conf.get(BLOCK_MANAGER_PORT)
     }
 
+    // 如果启用了外部Shuffle服务，创建ExternalBlockStoreClient
     val externalShuffleClient = if (conf.get(config.SHUFFLE_SERVICE_ENABLED)) {
       val transConf = SparkTransportConf.fromSparkConf(
         conf,
@@ -435,8 +458,9 @@ object SparkEnv extends Logging {
       None
     }
 
-    // Mapping from block manager id to the block manager's information.
+    // BlockManagerId到BlockManagerInfo的映射表
     val blockManagerInfo = new concurrent.TrieMap[BlockManagerId, BlockManagerInfo]()
+    // 创建BlockManagerMaster（包含Driver端点和心跳端点）
     val blockManagerMaster = new BlockManagerMaster(
       registerOrLookupEndpoint(
         BlockManagerMaster.DRIVER_ENDPOINT_NAME,
@@ -459,15 +483,14 @@ object SparkEnv extends Logging {
       conf,
       isDriver)
 
+    // 创建基于Netty的Block传输服务
     val blockTransferService =
       new NettyBlockTransferService(conf, securityManager, serializerManager, bindAddress,
         advertiseAddress, blockManagerPort, numUsableCores, blockManagerMaster.driverEndpoint)
 
-    // NB: blockManager is not valid until initialize() is called later.
-    //     SPARK-45762 introduces a change where the ShuffleManager is initialized later
-    //     in the SparkContext and Executor, to allow for custom ShuffleManagers defined
-    //     in user jars. The BlockManager uses a lazy val to obtain the
-    //     shuffleManager from the SparkEnv.
+    // 注意：BlockManager在调用initialize()之前不可用。
+    // SPARK-45762: ShuffleManager延迟到SparkContext/Executor中初始化，
+    // BlockManager使用lazy val从SparkEnv获取ShuffleManager。
     val blockManager = new BlockManager(
       executorId,
       rpcEnv,
@@ -481,21 +504,20 @@ object SparkEnv extends Logging {
       securityManager,
       externalShuffleClient)
 
+    // 创建MetricsSystem：Driver端延迟启动（等待TaskScheduler分配app ID），
+    // Executor端立即启动
     val metricsSystem = if (isDriver) {
-      // Don't start metrics system right now for Driver.
-      // We need to wait for the task scheduler to give us an app ID.
-      // Then we can start the metrics system.
       MetricsSystem.createMetricsSystem(MetricsSystemInstances.DRIVER, conf)
     } else {
-      // We need to set the executor ID before the MetricsSystem is created because sources and
-      // sinks specified in the metrics configuration file will want to incorporate this executor's
-      // ID into the metrics they report.
+      // Executor端需要在创建MetricsSystem前设置executor ID，
+      // 因为指标源和接收器会在上报中使用此ID
       conf.set(EXECUTOR_ID, executorId)
       val ms = MetricsSystem.createMetricsSystem(MetricsSystemInstances.EXECUTOR, conf)
       ms.start(conf.get(METRICS_STATIC_SOURCES_ENABLED))
       ms
     }
 
+    // 创建OutputCommitCoordinator（协调多个任务的输出提交，防止重复提交）
     val outputCommitCoordinator = mockOutputCommitCoordinator.getOrElse {
       new OutputCommitCoordinator(conf, isDriver)
     }
@@ -503,6 +525,7 @@ object SparkEnv extends Logging {
       new OutputCommitCoordinatorEndpoint(rpcEnv, outputCommitCoordinator))
     outputCommitCoordinator.coordinatorRef = Some(outputCommitCoordinatorRef)
 
+    // 组装所有组件创建SparkEnv实例
     val envInstance = new SparkEnv(
       executorId,
       rpcEnv,
@@ -517,9 +540,7 @@ object SparkEnv extends Logging {
       outputCommitCoordinator,
       conf)
 
-    // Add a reference to tmp dir created by driver, we will delete this tmp dir when stop() is
-    // called, and we only need to do it for driver. Because driver may run as a service, and if we
-    // don't delete this tmp dir when sc is stopped, then will create too many tmp dirs.
+    // Driver端创建临时目录用于存放用户上传的文件，停止时会清理
     if (isDriver) {
       val sparkFilesDir = Utils.createTempDir(Utils.getLocalDir(conf), "userFiles").getAbsolutePath
       envInstance.driverTmpDir = Some(sparkFilesDir)
@@ -529,9 +550,8 @@ object SparkEnv extends Logging {
   }
 
   /**
-   * Return a map representation of jvm information, Spark properties, system properties, and
-   * class paths. Map keys define the category, and map values represent the corresponding
-   * attributes as a sequence of KV pairs. This is used mainly for SparkListenerEnvironmentUpdate.
+   * 返回JVM信息、Spark属性、系统属性、类路径的Map表示。
+   * 主要用于SparkListenerEnvironmentUpdate事件。
    */
   private[spark] def environmentDetails(
       conf: SparkConf,
@@ -543,14 +563,14 @@ object SparkEnv extends Logging {
       metricsProperties: Map[String, String]): Map[String, Seq[(String, String)]] = {
 
     import Properties._
+    // JVM基本信息
     val jvmInformation = Seq(
       ("Java Version", s"$javaVersion ($javaVendor)"),
       ("Java Home", javaHome),
       ("Scala Version", versionString)
     ).sorted
 
-    // Spark properties
-    // This includes the scheduling mode whether or not it is configured (used by SparkUI)
+    // Spark配置属性（包含调度模式，无论是否显式配置都会包含，SparkUI需要）
     val schedulerMode =
       if (!conf.contains(SCHEDULER_MODE)) {
         Seq((SCHEDULER_MODE.key, schedulingMode))
@@ -559,13 +579,13 @@ object SparkEnv extends Logging {
       }
     val sparkProperties = (conf.getAll ++ schedulerMode).sorted
 
-    // System properties that are not java classpaths
+    // 系统属性（排除Java classpath和spark.*开头的属性）
     val systemProperties = Utils.getSystemProperties.toSeq
     val otherProperties = systemProperties.filter { case (k, _) =>
       k != "java.class.path" && !k.startsWith("spark.")
     }.sorted
 
-    // Class paths including all added jars and files
+    // 类路径（包含用户添加的JAR/文件/归档和系统classpath）
     val classPathEntries = javaClassPath
       .split(File.pathSeparator)
       .filterNot(_.isEmpty)
@@ -573,8 +593,7 @@ object SparkEnv extends Logging {
     val addedJarsAndFiles = (addedJars ++ addedFiles ++ addedArchives).map((_, "Added By User"))
     val classPaths = (addedJarsAndFiles ++ classPathEntries).sorted
 
-    // Add Hadoop properties, it will not ignore configs including in Spark. Some spark
-    // conf starting with "spark.hadoop" may overwrite it.
+    // Hadoop配置属性
     val hadoopProperties = hadoopConf.asScala
       .map(entry => (entry.getKey, entry.getValue)).toSeq.sorted
     Map[String, Seq[(String, String)]](
