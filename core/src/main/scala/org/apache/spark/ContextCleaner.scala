@@ -56,63 +56,50 @@ private class CleanupTaskWeakReference(
   extends WeakReference(referent, referenceQueue)
 
 /**
- * An asynchronous cleaner for RDD, shuffle, and broadcast state.
+ * RDD、Shuffle 和 Broadcast 等资源的异步清理器。
  *
- * This maintains a weak reference for each RDD, ShuffleDependency, and Broadcast of interest,
- * to be processed when the associated object goes out of scope of the application. Actual
- * cleanup is performed in a separate daemon thread.
+ * 为每个需要关注的 RDD、ShuffleDependency 和 Broadcast 维护一个弱引用，
+ * 当关联对象超出应用作用域时在独立的守护线程中执行实际清理。
  */
 private[spark] class ContextCleaner(
     sc: SparkContext,
     shuffleDriverComponents: ShuffleDriverComponents) extends Logging {
 
   /**
-   * A buffer to ensure that `CleanupTaskWeakReference`s are not garbage collected as long as they
-   * have not been handled by the reference queue.
+   * 缓冲区：确保 CleanupTaskWeakReference 在被引用队列处理之前不会被 GC 回收。
    */
   private val referenceBuffer =
     Collections.newSetFromMap[CleanupTaskWeakReference](new ConcurrentHashMap)
 
+  // GC 弱引用队列，弱引用对象被 GC 后会被加入此队列
   private val referenceQueue = new ReferenceQueue[AnyRef]
 
+  // 清理事件监听器列表
   private val listeners = new ConcurrentLinkedQueue[CleanerListener]()
 
+  // 执行清理任务的守护线程
   private val cleaningThread = new Thread() { override def run(): Unit = keepCleaning() }
 
+  // 定期触发 GC 的调度线程
   private val periodicGCService: ScheduledExecutorService =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("context-cleaner-periodic-gc")
 
   /**
-   * How often to trigger a garbage collection in this JVM.
-   *
-   * This context cleaner triggers cleanups only when weak references are garbage collected.
-   * In long-running applications with large driver JVMs, where there is little memory pressure
-   * on the driver, this may happen very occasionally or not at all. Not cleaning at all may
-   * lead to executors running out of disk space after a while.
+   * 定期 GC 的间隔时间。
+   * 清理器依赖弱引用被 GC 才会触发清理。在大 JVM 且内存压力低的长期运行应用中，
+   * GC 可能很少发生，不清理会导致 Executor 磁盘空间耗尽。
    */
   private val periodicGCInterval = sc.conf.get(CLEANER_PERIODIC_GC_INTERVAL)
 
   /**
-   * Whether the cleaning thread will block on cleanup tasks (other than shuffle, which
-   * is controlled by the `spark.cleaner.referenceTracking.blocking.shuffle` parameter).
-   *
-   * Due to SPARK-3015, this is set to true by default. This is intended to be only a temporary
-   * workaround for the issue, which is ultimately caused by the way the BlockManager endpoints
-   * issue inter-dependent blocking RPC messages to each other at high frequencies. This happens,
-   * for instance, when the driver performs a GC and cleans up all broadcast blocks that are no
-   * longer in scope.
+   * 清理线程是否阻塞等待清理任务完成（Shuffle 由单独参数控制）。
+   * 因 SPARK-3015 默认为 true，作为 BlockManager 端点间高频阻塞 RPC 问题的临时解决方案。
    */
   private val blockOnCleanupTasks = sc.conf.get(CLEANER_REFERENCE_TRACKING_BLOCKING)
 
   /**
-   * Whether the cleaning thread will block on shuffle cleanup tasks.
-   *
-   * When context cleaner is configured to block on every delete request, it can throw timeout
-   * exceptions on cleanup of shuffle blocks, as reported in SPARK-3139. To avoid that, this
-   * parameter by default disables blocking on shuffle cleanups. Note that this does not affect
-   * the cleanup of RDDs and broadcasts. This is intended to be a temporary workaround,
-   * until the real RPC issue (referred to in the comment above `blockOnCleanupTasks`) is
-   * resolved.
+   * 清理线程是否阻塞等待 Shuffle 清理任务完成。
+   * 因 SPARK-3139 默认为 false，避免 Shuffle 清理时的超时异常。
    */
   private val blockOnShuffleCleanupTasks =
     sc.conf.get(CLEANER_REFERENCE_TRACKING_BLOCKING_SHUFFLE)
@@ -134,7 +121,9 @@ private[spark] class ContextCleaner(
   }
 
   /**
-   * Stop the cleaning thread and wait until the thread has finished running its current task.
+   * 停止清理线程并等待当前任务完成。
+   * 使用 synchronized 防止在清理线程处理任务时被中断，
+   * 避免误清理不同 SparkContext 创建的同名资源（SPARK-6132）。
    */
   def stop(): Unit = {
     stopped = true
@@ -250,7 +239,7 @@ private[spark] class ContextCleaner(
     }
   }
 
-  /** Perform broadcast cleanup. */
+  // 清理 Broadcast：销毁广播变量并通知监听器
   def doCleanupBroadcast(broadcastId: Long, blocking: Boolean): Unit = {
     try {
       logDebug(s"Cleaning broadcast $broadcastId")
