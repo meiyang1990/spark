@@ -63,42 +63,36 @@ private[spark] class TaskContextImpl(
   with Logging {
 
   /**
-   * List of callback functions to execute when the task completes.
-   *
-   * Using a stack causes us to process listeners in reverse order of registration. As listeners are
-   * invoked, they are popped from the stack.
+   * 任务完成回调函数栈。
+   * 使用 Stack 使得监听器按注册的逆序执行。调用时从栈顶弹出。
    */
   @transient private val onCompleteCallbacks = new Stack[TaskCompletionListener]
 
-  /** List of callback functions to execute when the task fails. */
+  // 任务失败回调函数栈
   @transient private val onFailureCallbacks = new Stack[TaskFailureListener]
 
   /**
-   * The thread currently executing task completion or failure listeners, if any.
-   *
-   * `invokeListeners()` uses this to ensure listeners are called sequentially.
+   * 当前正在执行完成/失败回调的线程（如果有的话）。
+   * invokeListeners() 用它保证回调串行执行，避免并发调用。
    */
   @transient @volatile private var listenerInvocationThread: Option[Thread] = None
 
-  // If defined, the corresponding task has been killed and this option contains the reason.
+  // 如果任务被 kill，记录 kill 原因
   @volatile private var reasonIfKilled: Option[String] = None
 
-  // The pending interruption request, which is blocked by uninterruptible resource creation.
-  // Should be protected by `TaskContext.synchronized`.
+  // 挂起的中断请求，被不可中断的资源创建阻塞时暂存。受 TaskContext.synchronized 保护
   private var pendingInterruptRequest: Option[(Option[Thread], String)] = None
 
-  // Whether this task is able to be interrupted. Should be protected by `TaskContext.synchronized`.
+  // 任务是否可被中断。受 TaskContext.synchronized 保护
   private var _interruptible = true
 
-  // Whether the task has completed.
+  // 任务是否已完成
   private var completed: Boolean = false
 
-  // If defined, the task has failed and this option contains the Throwable that caused the task to
-  // fail.
+  // 如果任务失败，记录导致失败的异常
   private var failureCauseOpt: Option[Throwable] = None
 
-  // If there was a fetch failure in the task, we store it here, to make sure user-code doesn't
-  // hide the exception.  See SPARK-19276
+  // Fetch 失败时保存异常，防止用户代码吞掉该异常（SPARK-19276）
   @volatile private var _fetchFailedException: Option[FetchFailedException] = None
 
   override def addTaskCompletionListener(listener: TaskCompletionListener): this.type = {
@@ -138,6 +132,7 @@ private[spark] class TaskContextImpl(
     invokeTaskFailureListeners(error)
   }
 
+  // 标记任务完成并触发所有完成回调（幂等：重复调用不会再次触发）
   private[spark] override def markTaskCompleted(error: Option[Throwable]): Unit = {
     synchronized {
       if (completed) return
@@ -166,37 +161,31 @@ private[spark] class TaskContextImpl(
     }
   }
 
+  /**
+   * 通用的监听器调用方法。需满足两个约束：
+   * 1. 监听器必须串行执行（TaskContext API 保证）
+   * 2. 监听器可能创建新线程调用 TaskContext 方法，不能在持锁时调用监听器（避免死锁）
+   *
+   * 通过确保任意时刻最多一个线程在执行监听器来同时满足上述约束。
+   */
   private def invokeListeners[T](
       listeners: Stack[T],
       name: String,
       error: Option[Throwable])(
       callback: T => Unit): Unit = {
-    // This method is subject to two constraints:
-    //
-    // 1. Listeners must be run sequentially to uphold the guarantee provided by the TaskContext
-    //    API.
-    //
-    // 2. Listeners may spawn threads that call methods on this TaskContext. To avoid deadlock, we
-    //    cannot call listeners while holding the TaskContext lock.
-    //
-    // We meet these constraints by ensuring there is at most one thread invoking listeners at any
-    // point in time.
     synchronized {
       if (listenerInvocationThread.nonEmpty) {
-        // If another thread is already invoking listeners, do nothing.
+        // 已有其他线程在执行监听器，当前线程直接返回
         return
       } else {
-        // If no other thread is invoking listeners, register this thread as the listener invocation
-        // thread. This prevents other threads from invoking listeners until this thread is
-        // deregistered.
+        // 注册当前线程为监听器执行线程，阻止其他线程并发执行
         listenerInvocationThread = Some(Thread.currentThread())
       }
     }
 
+    // 从栈中取出下一个监听器或注销当前线程
     def getNextListenerOrDeregisterThread(): Option[T] = synchronized {
       if (listeners.empty()) {
-        // We have executed all listeners that have been added so far. Deregister this thread as the
-        // callback invocation thread.
         listenerInvocationThread = None
         None
       } else {
@@ -212,40 +201,9 @@ private[spark] class TaskContextImpl(
         callback(listener)
       } catch {
         case e: Throwable =>
-          // A listener failed. Temporarily clear the listenerInvocationThread and markTaskFailed.
-          //
-          // One of the following cases applies (#3 being the interesting one):
-          //
-          // 1. [[Task.doRunTask]] is currently calling [[markTaskFailed]] because the task body
-          //    failed, and now a failure listener has failed here (not necessarily the first to
-          //    fail). Then calling [[markTaskFailed]] again here is a no-op, and we simply resume
-          //    running the remaining failure listeners. [[Task.doRunTask]] will then call
-          //    [[markTaskCompleted]] after this method returns.
-          //
-          // 2. The task body failed, [[Task.doRunTask]] already called [[markTaskFailed]],
-          //    [[Task.doRunTask]] is currently calling [[markTaskCompleted]], and now a completion
-          //    listener has failed here (not necessarily the first one to fail). Then calling
-          //    [[markTaskFailed]] it again here is a no-op, and we simply resume running the
-          //    remaining completion listeners.
-          //
-          // 3. [[Task.doRunTask]] is currently calling [[markTaskCompleted]] because the task body
-          //    succeeded, and now a completion listener has failed here (the first one to
-          //    fail). Then our call to [[markTaskFailed]] here will run all failure listeners
-          //    before returning, after which we will resume running the remaining completion
-          //    listeners.
-          //
-          // 4. [[Task.doRunTask]] is currently calling [[markTaskCompleted]] because the task body
-          //    succeeded, but [[markTaskFailed]] is currently running because a completion listener
-          //    has failed, and now a failure listener has failed (not necessarily the first one to
-          //    fail). Then calling [[markTaskFailed]] again here will have no effect, and we simply
-          //    resume running the remaining failure listeners; we will resume running the remaining
-          //    completion listeners after this call returns.
-          //
-          // 5. [[Task.doRunTask]] is currently calling [[markTaskCompleted]] because the task body
-          //    succeeded, [[markTaskFailed]] already ran because a completion listener previously
-          //    failed, and now another completion listener has failed. Then our call to
-          //    [[markTaskFailed]] here will have no effect and we simply resume running the
-          //    remaining completion handlers.
+          // 监听器执行失败时：临时清除 listenerInvocationThread 并调用 markTaskFailed
+          // 这会触发失败回调链，完成后继续执行剩余的监听器
+          // 涵盖多种并发场景（任务体成功/失败 × 完成监听器失败 × 失败监听器失败等组合）
           try {
             listenerInvocationThread = None
             markTaskFailed(e)
@@ -262,6 +220,7 @@ private[spark] class TaskContextImpl(
           logError(log"Error in ${MDC(LISTENER, name)}", e)
       }
     }
+    // 如果有监听器抛出异常，汇总后抛出
     if (listenerExceptions.nonEmpty) {
       val exception = new TaskCompletionListenerException(
         listenerExceptions.map(_.getMessage).toSeq, error)
@@ -318,8 +277,15 @@ private[spark] class TaskContextImpl(
     }
   }
 
+  /**
+   * 在不可中断的上下文中创建资源。
+   * 创建前先检查是否有挂起的中断请求，若有则立即抛出异常。
+   * 创建期间将 _interruptible 设为 false，阻止中断请求生效。
+   * 创建完成后注册完成回调自动关闭资源，并恢复可中断状态。
+   */
   def createResourceUninterruptibly[T <: Closeable](resourceBuilder: => T): T = {
 
+    // 检查并执行挂起的中断请求
     @inline def interruptIfRequired(): Unit = {
       pendingInterruptRequest.foreach { case (threadToInterrupt, reason) =>
         markInterrupted(reason)
