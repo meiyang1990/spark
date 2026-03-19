@@ -117,9 +117,10 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
       0, checkTimeoutIntervalMs, TimeUnit.MILLISECONDS)
   }
 
+  // 处理各类 RPC 消息并回复
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
 
-    // Messages sent and received locally
+    // 本地发送和接收的消息
     case ExecutorRegistered(executorId) =>
       executorLastSeen(executorId) = clock.getTimeMillis()
       context.reply(true)
@@ -133,12 +134,13 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
       expireDeadHosts()
       context.reply(true)
 
-    // Messages received from executors
+    // 来自 Executor 的心跳消息
     case heartbeat @ Heartbeat(executorId, accumUpdates, blockManagerId, executorUpdates) =>
       var reregisterBlockManager = !sc.isStopped
       if (scheduler != null) {
         if (executorLastSeen.contains(executorId)) {
           executorLastSeen(executorId) = clock.getTimeMillis()
+          // 在事件循环线程中处理心跳，避免阻塞 RPC 线程
           eventLoopThread.submit(new Runnable {
             override def run(): Unit = Utils.tryLogNonFatalError {
               val unknownExecutor = !scheduler.executorHeartbeatReceived(
@@ -149,17 +151,12 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
             }
           })
         } else {
-          // This may happen if we get an executor's in-flight heartbeat immediately
-          // after we just removed it. It's not really an error condition so we should
-          // not log warning here. Otherwise there may be a lot of noise especially if
-          // we explicitly remove executors (SPARK-4134).
+          // 收到已移除 Executor 的飞行中心跳，非错误情况，不输出警告（SPARK-4134）
           logDebug(s"Received heartbeat from unknown executor $executorId")
           context.reply(HeartbeatResponse(reregisterBlockManager))
         }
       } else {
-        // Because Executor will sleep several seconds before sending the first "Heartbeat", this
-        // case rarely happens. However, if it really happens, log it and ask the executor to
-        // register itself again.
+        // Executor 会在发送第一次心跳前等待数秒，此情况极少发生
         logWarning(log"Dropping ${MDC(HEARTBEAT, heartbeat)} " +
           log"because TaskScheduler is not ready yet")
         context.reply(HeartbeatResponse(reregisterBlockManager))
@@ -207,6 +204,7 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
     removeExecutor(executorRemoved.executorId)
   }
 
+  // 检查并过期长时间未发送心跳的 Executor
   private def expireDeadHosts(): Unit = {
     logTrace("Checking for hosts with no recent heartbeats in HeartbeatReceiver.")
     val now = clock.getTimeMillis()
@@ -216,28 +214,19 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
           log"with no recent heartbeats: " +
           log"${MDC(TIME_UNITS, now - lastSeenMs)} ms exceeds timeout " +
           log"${MDC(EXECUTOR_TIMEOUT, executorTimeoutMs)} ms")
-        // Asynchronously kill the executor to avoid blocking the current thread
+        // 异步 kill Executor 以避免阻塞当前线程
         killExecutorThread.submit(new Runnable {
           override def run(): Unit = Utils.tryLogNonFatalError {
-            // Note: we want to get an executor back after expiring this one,
-            // so do not simply call `sc.killExecutor` here (SPARK-8119)
+            // 使用 killAndReplaceExecutor 而非 killExecutor，以便获取替代 Executor（SPARK-8119）
             sc.killAndReplaceExecutor(executorId)
-            // SPARK-27348: in case of the executors which are not gracefully shut down,
-            // we should remove lost executors from CoarseGrainedSchedulerBackend manually
-            // here to guarantee two things:
-            // 1) explicitly remove executor information from CoarseGrainedSchedulerBackend for
-            //    a lost executor instead of waiting for disconnect message
-            // 2) call scheduler.executorLost() underlying to fail any tasks assigned to
-            //    those executors to avoid app hang
+            // SPARK-27348: 对于非优雅关闭的 Executor，手动从 CoarseGrainedSchedulerBackend 移除
+            // 以确保：1) 显式移除信息而非等待断连消息 2) 调用 executorLost() 使分配到该 Executor 的任务失败
             sc.schedulerBackend match {
               case backend: CoarseGrainedSchedulerBackend =>
                 backend.driverEndpoint.send(RemoveExecutor(executorId,
                   ExecutorProcessLost(
                     s"Executor heartbeat timed out after ${now - lastSeenMs} ms")))
-
-              // LocalSchedulerBackend is used locally and only has one single executor
               case _: LocalSchedulerBackend =>
-
               case other => throw new UnsupportedOperationException(
                 s"Unknown scheduler backend: ${other.getClass}")
             }
