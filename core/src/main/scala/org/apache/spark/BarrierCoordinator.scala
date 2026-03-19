@@ -236,17 +236,17 @@ private[spark] class BarrierCoordinator(
 private[spark] sealed trait BarrierCoordinatorMessage extends Serializable
 
 /**
- * A global sync request message from BarrierTaskContext. Each request is
- * identified by stageId + stageAttemptId + barrierEpoch.
+ * 来自 BarrierTaskContext 的全局同步请求消息。
+ * 通过 stageId + stageAttemptId + barrierEpoch 唯一标识。
  *
- * @param numTasks The number of global sync requests the BarrierCoordinator shall receive
- * @param stageId ID of current stage
- * @param stageAttemptId ID of current stage attempt
- * @param taskAttemptId Unique ID of current task
- * @param barrierEpoch ID of a runBarrier() call, a task may consist multiple runBarrier() calls
- * @param partitionId ID of the current partition the task is assigned to
- * @param message Message sent from the BarrierTaskContext
- * @param requestMethod The BarrierTaskContext method that was called to trigger BarrierCoordinator
+ * @param numTasks 协调器需要收到的全局同步请求总数
+ * @param stageId 当前 Stage ID
+ * @param stageAttemptId 当前 Stage 尝试 ID
+ * @param taskAttemptId 当前任务唯一 ID
+ * @param barrierEpoch barrier() 调用的 ID，一个任务可能包含多次 barrier() 调用
+ * @param partitionId 任务所分配的分区 ID
+ * @param message 从 BarrierTaskContext 发送的消息
+ * @param requestMethod 触发协调器的 BarrierTaskContext 方法（BARRIER 或 ALL_GATHER）
  */
 private[spark] case class RequestToSync(
   numTasks: Int,
