@@ -39,65 +39,27 @@ import org.apache.spark.scheduler.dynalloc.ExecutorMonitor
 import org.apache.spark.util.{Clock, SystemClock, ThreadUtils, Utils}
 
 /**
- * An agent that dynamically allocates and removes executors based on the workload.
+ * 基于工作负载动态分配和移除 Executor 的代理。
  *
- * The ExecutorAllocationManager maintains a moving target number of executors, for each
- * ResourceProfile, which is periodically synced to the cluster manager. The target starts
- * at a configured initial value and changes with the number of pending and running tasks.
+ * 为每个 ResourceProfile 维护一个目标 Executor 数量，并周期性地与集群管理器同步。
+ * 初始值由配置决定，随着待处理和正在运行的任务数量变化动态调整。
  *
- * Decreasing the target number of executors happens when the current target is more than needed to
- * handle the current load. The target number of executors is always truncated to the number of
- * executors that could run all current running and pending tasks at once.
+ * 【缩减策略】当前目标超过处理当前负载所需时缩减。
  *
- * Increasing the target number of executors happens in response to backlogged tasks waiting to be
- * scheduled. If the scheduler queue is not drained in M seconds, then new executors are added. If
- * the queue persists for another N seconds, then more executors are added and so on. The number
- * added in each round increases exponentially from the previous round until an upper bound has been
- * reached. The upper bound is based both on a configured property and on the current number of
- * running and pending tasks, as described above.
+ * 【扩展策略】当有积压任务等待调度时扩展。若调度器队列在 M 秒内未清空则添加新 Executor，
+ * 若积压持续 N 秒则继续添加，每轮增量按指数增长直到达到上限。
+ * 指数增长的原因：(1) 初期慢速添加以避免过度分配 (2) 后期快速增长以应对大规模负载。
  *
- * The rationale for the exponential increase is twofold: (1) Executors should be added slowly
- * in the beginning in case the number of extra executors needed turns out to be small. Otherwise,
- * we may add more executors than we need just to remove them later. (2) Executors should be added
- * quickly over time in case the maximum number of executors is very high. Otherwise, it will take
- * a long time to ramp up under heavy workloads.
+ * 【移除策略】若某 ResourceProfile 的 Executor 空闲 K 秒且数量超过需要，则移除。
+ * 缓存数据的 Executor 空闲超过 L 秒也会被移除。
  *
- * The remove policy is simpler and is applied on each ResourceProfile separately. If an executor
- * for that ResourceProfile has been idle for K seconds and the number of executors is more
- * then what is needed for that ResourceProfile, meaning there are not enough tasks that could use
- * the executor, then it is removed. Note that an executor caching any data
- * blocks will be removed if it has been idle for more than L seconds.
- *
- * There is no retry logic in either case because we make the assumption that the cluster manager
- * will eventually fulfill all requests it receives asynchronously.
- *
- * The relevant Spark properties are below. Each of these properties applies separately to
- * every ResourceProfile. So if you set a minimum number of executors, that is a minimum
- * for each ResourceProfile.
- *
- *   spark.dynamicAllocation.enabled - Whether this feature is enabled
- *   spark.dynamicAllocation.minExecutors - Lower bound on the number of executors
- *   spark.dynamicAllocation.maxExecutors - Upper bound on the number of executors
- *   spark.dynamicAllocation.initialExecutors - Number of executors to start with
- *
- *   spark.dynamicAllocation.executorAllocationRatio -
- *     This is used to reduce the parallelism of the dynamic allocation that can waste
- *     resources when tasks are small
- *
- *   spark.dynamicAllocation.schedulerBacklogTimeout (M) -
- *     If there are backlogged tasks for this duration, add new executors
- *
- *   spark.dynamicAllocation.sustainedSchedulerBacklogTimeout (N) -
- *     If the backlog is sustained for this duration, add more executors
- *     This is used only after the initial backlog timeout is exceeded
- *
- *   spark.dynamicAllocation.executorIdleTimeout (K) -
- *     If an executor without caching any data blocks has been idle for this duration, remove it
- *
- *   spark.dynamicAllocation.cachedExecutorIdleTimeout (L) -
- *     If an executor with caching data blocks has been idle for more than this duration,
- *     the executor will be removed
- *
+ * 关键配置项（按 ResourceProfile 独立生效）：
+ *   spark.dynamicAllocation.enabled / minExecutors / maxExecutors / initialExecutors
+ *   spark.dynamicAllocation.executorAllocationRatio - 降低并行度以节省小任务资源
+ *   spark.dynamicAllocation.schedulerBacklogTimeout (M) - 积压触发添加的超时
+ *   spark.dynamicAllocation.sustainedSchedulerBacklogTimeout (N) - 持续积压触发添加的超时
+ *   spark.dynamicAllocation.executorIdleTimeout (K) - 无缓存 Executor 空闲移除超时
+ *   spark.dynamicAllocation.cachedExecutorIdleTimeout (L) - 有缓存 Executor 空闲移除超时
  */
 private[spark] class ExecutorAllocationManager(
     client: ExecutorAllocationClient,
@@ -113,21 +75,22 @@ private[spark] class ExecutorAllocationManager(
 
   import ExecutorAllocationManager._
 
-  // Lower and upper bounds on the number of executors.
+  // Executor 数量的上下限配置
   private val minNumExecutors = conf.get(DYN_ALLOCATION_MIN_EXECUTORS)
   private val maxNumExecutors = conf.get(DYN_ALLOCATION_MAX_EXECUTORS)
   private val initialNumExecutors = Utils.getDynamicAllocationInitialExecutors(conf)
 
-  // How long there must be backlogged tasks for before an addition is triggered (seconds)
+  // 积压任务多久后触发添加 Executor（秒）
   private val schedulerBacklogTimeoutS = conf.get(DYN_ALLOCATION_SCHEDULER_BACKLOG_TIMEOUT)
 
-  // Same as above, but used only after `schedulerBacklogTimeoutS` is exceeded
+  // 首次超时后，持续积压多久继续添加（秒）
   private val sustainedSchedulerBacklogTimeoutS =
     conf.get(DYN_ALLOCATION_SUSTAINED_SCHEDULER_BACKLOG_TIMEOUT)
 
-  // During testing, the methods to actually kill and add executors are mocked out
+  // 测试模式下 mock 掉实际的 kill/add 操作
   private val testing = conf.get(DYN_ALLOCATION_TESTING)
 
+  // Executor 分配比率，用于小任务场景降低并行度以节省资源
   private val executorAllocationRatio =
     conf.get(DYN_ALLOCATION_EXECUTOR_ALLOCATION_RATIO)
 
@@ -137,55 +100,46 @@ private[spark] class ExecutorAllocationManager(
 
   validateSettings()
 
-  // Number of executors to add for each ResourceProfile in the next round
+  // 每个 ResourceProfile 下一轮要添加的 Executor 数量（指数增长）
   private[spark] val numExecutorsToAddPerResourceProfileId = new mutable.HashMap[Int, Int]
   numExecutorsToAddPerResourceProfileId(defaultProfileId) = 1
 
-  // The desired number of executors at this moment in time. If all our executors were to die, this
-  // is the number of executors we would immediately want from the cluster manager.
-  // Note every profile will be allowed to have initial number,
-  // we may want to make this configurable per Profile in the future
+  // 每个 ResourceProfile 当前的目标 Executor 数量
   private[spark] val numExecutorsTargetPerResourceProfileId = new mutable.HashMap[Int, Int]
   numExecutorsTargetPerResourceProfileId(defaultProfileId) = initialNumExecutors
 
-  // A timestamp of when an addition should be triggered, or NOT_SET if it is not set
-  // This is set when pending tasks are added but not scheduled yet
+  // 下次触发添加 Executor 的时间戳（纳秒），NOT_SET 表示未设置
   private var addTime: Long = NOT_SET
 
-  // Polling loop interval (ms)
+  // 调度轮询间隔（毫秒）
   private val intervalMillis: Long = 100
 
-  // Listener for Spark events that impact the allocation policy
+  // 监听 Spark 事件以驱动分配策略
   val listener = new ExecutorAllocationListener
 
-  // Executor that handles the scheduling task.
+  // 执行调度任务的单线程调度器
   private val executor =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("spark-dynamic-executor-allocation")
 
-  // Metric source for ExecutorAllocationManager to expose internal status to MetricsSystem.
+  // 暴露内部状态到 MetricsSystem 的指标源
   val executorAllocationManagerSource = new ExecutorAllocationManagerSource(this)
 
+  // Executor 监控器：追踪 Executor 空闲状态、退役和资源使用
   val executorMonitor =
     new ExecutorMonitor(conf, client, listenerBus, clock, executorAllocationManagerSource)
 
-  // Whether we are still waiting for the initial set of executors to be allocated.
-  // While this is true, we will not cancel outstanding executor requests. This is
-  // set to false when:
-  //   (1) a stage is submitted, or
-  //   (2) an executor idle timeout has elapsed.
+  // 是否仍在等待初始 Executor 分配。为 true 时不取消未完成的请求。
+  // 在 (1) Stage 提交 或 (2) Executor 空闲超时后设为 false。
   @volatile private var initializing: Boolean = true
 
-  // Number of locality aware tasks for each ResourceProfile, used for executor placement.
+  // 每个 ResourceProfile 的数据本地性感知任务数，用于 Executor 放置
   private var numLocalityAwareTasksPerResourceProfileId = new mutable.HashMap[Int, Int]
   numLocalityAwareTasksPerResourceProfileId(defaultProfileId) = 0
 
-  // ResourceProfile id to Host to possible task running on it, used for executor placement.
+  // ResourceProfile id 到 Host 到本地任务数的映射，用于 Executor 放置决策
   private var rpIdToHostToLocalTaskCount: Map[Int, Map[String, Int]] = Map.empty
 
-  /**
-   * Verify that the settings specified through the config are valid.
-   * If not, throw an appropriate exception.
-   */
+  // 校验动态分配相关的配置项是否合法，不合法则抛出异常
   private def validateSettings(): Unit = {
     if (minNumExecutors < 0 || maxNumExecutors < 0) {
       throw new SparkException(
@@ -238,10 +192,7 @@ private[spark] class ExecutorAllocationManager(
     }
   }
 
-  /**
-   * Register for scheduler callbacks to decide when to add and remove executors, and start
-   * the scheduling task.
-   */
+  // 注册调度器回调、启动定时调度任务并向集群管理器请求初始 Executor
   def start(): Unit = {
     listenerBus.addToManagementQueue(listener)
     listenerBus.addToManagementQueue(executorMonitor)
@@ -265,19 +216,14 @@ private[spark] class ExecutorAllocationManager(
     client.requestTotalExecutors(numExecutorsTarget, numLocalityAware, rpIdToHostToLocalTaskCount)
   }
 
-  /**
-   * Stop the allocation manager.
-   */
+  // 停止动态分配管理器
   def stop(): Unit = {
     ThreadUtils.shutdown(executor, FiniteDuration(10, TimeUnit.SECONDS))
   }
 
   /**
-   * Reset the allocation manager when the cluster manager loses track of the driver's state.
-   * This is currently only done in YARN client mode, when the AM is restarted.
-   *
-   * This method forgets about any state about existing executors, and forces the scheduler to
-   * re-evaluate the number of needed executors the next time it's run.
+   * 当集群管理器丢失 Driver 状态时重置分配管理器（目前仅用于 YARN client 模式 AM 重启）。
+   * 忘记所有已有 Executor 的状态，强制调度器在下次运行时重新评估。
    */
   def reset(): Unit = synchronized {
     addTime = 0L
@@ -290,10 +236,7 @@ private[spark] class ExecutorAllocationManager(
     executorMonitor.reset()
   }
 
-  /**
-   * The maximum number of executors, for the ResourceProfile id passed in, that we would need
-   * under the current load to satisfy all running and pending tasks, rounded up.
-   */
+  // 计算指定 ResourceProfile 当前负载下最多需要的 Executor 数量（向上取整）
   private[spark] def maxNumExecutorsNeededPerResourceProfile(rpId: Int): Int = {
     val pendingTask = listener.pendingTasksPerResourceProfile(rpId)
     val pendingSpeculative = listener.pendingSpeculativeTasksPerResourceProfile(rpId)
@@ -309,17 +252,14 @@ private[spark] class ExecutorAllocationManager(
 
     val maxNeededWithSpeculationLocalityOffset =
       if (tasksPerExecutor > 1 && maxNeeded == 1 && pendingSpeculative > 0) {
-      // If we have pending speculative tasks and only need a single executor, allocate one more
-      // to satisfy the locality requirements of speculation
+      // 有待处理的推测任务且只需 1 个 Executor 时，多分配 1 个以满足推测执行的本地性需求
       maxNeeded + 1
     } else {
       maxNeeded
     }
 
     if (unschedulableTaskSets > 0) {
-      // Request additional executors to account for task sets having tasks that are unschedulable
-      // due to executors excluded for failures when the active executor count has already reached
-      // the max needed which we would normally get.
+      // 有因 Executor/节点被排除而无法调度的任务集时，额外请求 Executor
       val maxNeededForUnschedulables = math.ceil(unschedulableTaskSets * executorAllocationRatio /
         tasksPerExecutor).toInt
       math.max(maxNeededWithSpeculationLocalityOffset,
@@ -330,21 +270,22 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * This is called at a fixed interval to regulate the number of pending executor requests
-   * and number of executors running.
+   * 定时调度入口，按固定间隔调用，调节 Executor 请求数和运行数。
    *
-   * First, adjust our requested executors based on the add time and our current needs.
-   * Then, if the remove time for an existing executor has expired, kill the executor.
+   * 先根据添加时间和当前需求调整请求的 Executor 数，
+   * 然后移除已超时空闲的 Executor。
    *
-   * This is factored out into its own method for testing.
+   * 独立为方法便于测试。
    */
   private def schedule(): Unit = synchronized {
+    // 获取空闲超时的 Executor 列表
     val executorIdsToBeRemoved = executorMonitor.timedOutExecutors()
     if (executorIdsToBeRemoved.nonEmpty) {
+      // 有超时 Executor 说明系统已稳定运行，退出初始化状态
       initializing = false
     }
 
-    // Update executor target number only after initializing flag is unset
+    // 初始化标志清除后才更新目标 Executor 数量
     updateAndSyncNumExecutorsTarget(clock.nanoTime())
     if (executorIdsToBeRemoved.nonEmpty) {
       removeExecutors(executorIdsToBeRemoved)
@@ -352,40 +293,29 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * Updates our target number of executors for each ResourceProfile and then syncs the result
-   * with the cluster manager.
+   * 更新每个 ResourceProfile 的目标 Executor 数量并同步到集群管理器。
    *
-   * Check to see whether our existing allocation and the requests we've made previously exceed our
-   * current needs. If so, truncate our target and let the cluster manager know so that it can
-   * cancel pending requests that are unneeded.
+   * 如果当前分配和已发出的请求超过实际需求，则缩减目标数并通知集群管理器取消多余的待处理请求。
+   * 如果未超出且添加时间已到期，则请求新的 Executor 并刷新添加时间。
    *
-   * If not, and the add time has expired, see if we can request new executors and refresh the add
-   * time.
-   *
-   * @return the delta in the target number of executors.
+   * @return 目标 Executor 数量的变化量
    */
   private def updateAndSyncNumExecutorsTarget(now: Long): Int = synchronized {
     if (initializing) {
-      // Do not change our target while we are still initializing,
-      // Otherwise the first job may have to ramp up unnecessarily
+      // 初始化阶段不调整目标数，避免第一个作业不必要的预热
       0
     } else {
       val updatesNeeded = new mutable.HashMap[Int, ExecutorAllocationManager.TargetNumUpdates]
 
-      // Update targets for all ResourceProfiles then do a single request to the cluster manager
+      // 遍历所有 ResourceProfile，统一更新目标后一次性请求集群管理器
       numExecutorsTargetPerResourceProfileId.foreach { case (rpId, targetExecs) =>
         val maxNeeded = maxNumExecutorsNeededPerResourceProfile(rpId)
         if (maxNeeded < targetExecs) {
-          // The target number exceeds the number we actually need, so stop adding new
-          // executors and inform the cluster manager to cancel the extra pending requests
-
-          // We lower the target number of executors but don't actively kill any yet.  Killing is
-          // controlled separately by an idle timeout.  It's still helpful to reduce
-          // the target number in case an executor just happens to get lost (e.g., bad hardware,
-          // or the cluster manager preempts it) -- in that case, there is no point in trying
-          // to immediately  get a new executor, since we wouldn't even use it yet.
+          // 目标数超过实际需求，缩减目标（但不主动 kill，kill 由空闲超时机制单独控制）
+          // 缩减目标的好处：当 Executor 意外丢失时不会再申请不需要的补充
           decrementExecutorsFromTarget(maxNeeded, rpId, updatesNeeded)
         } else if (addTime != NOT_SET && now >= addTime) {
+          // 添加定时器已触发，尝试增加 Executor
           addExecutorsToTarget(maxNeeded, rpId, updatesNeeded)
         }
       }
@@ -393,6 +323,7 @@ private[spark] class ExecutorAllocationManager(
     }
   }
 
+  // 委托 updateTargetExecs 执行增加 Executor 目标数的操作
   private def addExecutorsToTarget(
       maxNeeded: Int,
       rpId: Int,
@@ -400,6 +331,7 @@ private[spark] class ExecutorAllocationManager(
     updateTargetExecs(addExecutors, maxNeeded, rpId, updatesNeeded)
   }
 
+  // 委托 updateTargetExecs 执行缩减 Executor 目标数的操作
   private def decrementExecutorsFromTarget(
       maxNeeded: Int,
       rpId: Int,
@@ -407,13 +339,16 @@ private[spark] class ExecutorAllocationManager(
     updateTargetExecs(decrementExecutors, maxNeeded, rpId, updatesNeeded)
   }
 
+  /**
+   * 通用的目标更新方法：调用传入的更新函数（增加或缩减），记录变化量到 updatesNeeded。
+   */
   private def updateTargetExecs(
       updateTargetFn: (Int, Int) => Int,
       maxNeeded: Int,
       rpId: Int,
       updatesNeeded: mutable.HashMap[Int, ExecutorAllocationManager.TargetNumUpdates]): Int = {
     val oldNumExecutorsTarget = numExecutorsTargetPerResourceProfileId(rpId)
-    // update the target number (add or remove)
+    // 执行更新（增加或缩减）
     val delta = updateTargetFn(maxNeeded, rpId)
     if (delta != 0) {
       updatesNeeded(rpId) = ExecutorAllocationManager.TargetNumUpdates(delta, oldNumExecutorsTarget)
@@ -421,13 +356,17 @@ private[spark] class ExecutorAllocationManager(
     delta
   }
 
+  /**
+   * 将目标 Executor 数量变更发送到集群管理器。
+   * 仅在目标确实发生变化时才向集群管理器发送请求。
+   */
   private def doUpdateRequest(
       updates: Map[Int, ExecutorAllocationManager.TargetNumUpdates],
       now: Long): Int = {
-    // Only call cluster manager if target has changed.
     if (updates.size > 0) {
       val requestAcknowledged = try {
         logDebug("requesting updates: " + updates)
+        // 向集群管理器发送总量请求（包含所有 ResourceProfile 的目标数和本地性信息）
         testing ||
           client.requestTotalExecutors(
             numExecutorsTargetPerResourceProfileId.toMap,
@@ -435,14 +374,11 @@ private[spark] class ExecutorAllocationManager(
             rpIdToHostToLocalTaskCount)
       } catch {
         case NonFatal(e) =>
-          // Use INFO level so the error it doesn't show up by default in shells.
-          // Errors here are more commonly caused by YARN AM restarts, which is a recoverable
-          // issue, and generate a lot of noisy output.
+          // 用 INFO 级别记录，避免 shell 中默认显示；YARN AM 重启是可恢复问题
           logInfo("Error reaching cluster manager.", e)
           false
       }
       if (requestAcknowledged) {
-        // have to go through all resource profiles that changed
         var totalDelta = 0
         updates.foreach { case (rpId, targetNum) =>
           val delta = targetNum.delta
@@ -454,12 +390,14 @@ private[spark] class ExecutorAllocationManager(
               log"(new desired total will be" +
               log" ${MDC(TARGET_NUM_EXECUTOR, numExecutorsTargetPerResourceProfileId(rpId))} " +
               log"for resource profile id: ${MDC(RESOURCE_PROFILE_ID, rpId)})")
+            // 指数增长策略：如果本轮实际增加数等于计划增加数，则下一轮翻倍；否则重置为1
             numExecutorsToAddPerResourceProfileId(rpId) =
               if (delta == numExecutorsToAddPerResourceProfileId(rpId)) {
                 numExecutorsToAddPerResourceProfileId(rpId) * 2
               } else {
                 1
               }
+            // 设置下一次增加的定时器
             logDebug(s"Starting timer to add more executors (to " +
               s"expire in $sustainedSchedulerBacklogTimeoutS seconds)")
             addTime = now + TimeUnit.SECONDS.toNanos(sustainedSchedulerBacklogTimeoutS)
@@ -473,7 +411,7 @@ private[spark] class ExecutorAllocationManager(
         }
         totalDelta
       } else {
-        // request was for all profiles so we have to go through all to reset to old num
+        // 请求未被确认，回滚所有 ResourceProfile 的目标数到旧值
         updates.foreach { case (rpId, targetNum) =>
           logWarning("Unable to reach the cluster manager to request more executors!")
           numExecutorsTargetPerResourceProfileId(rpId) = targetNum.oldNumExecutorsTarget
@@ -486,6 +424,7 @@ private[spark] class ExecutorAllocationManager(
     }
   }
 
+  // 缩减目标 Executor 数到 max(maxNeeded, minNumExecutors)，重置指数增长步长为 1
   private def decrementExecutors(maxNeeded: Int, rpId: Int): Int = {
     val oldNumExecutorsTarget = numExecutorsTargetPerResourceProfileId(rpId)
     numExecutorsTargetPerResourceProfileId(rpId) = math.max(maxNeeded, minNumExecutors)
@@ -494,40 +433,35 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * Update the target number of executors and figure out how many to add.
-   * If the cap on the number of executors is reached, give up and reset the
-   * number of executors to add next round instead of continuing to double it.
+   * 增加目标 Executor 数量并计算实际新增数。
+   * 采用指数增长策略（1, 2, 4, 8...），达到上限则重置步长。
    *
-   * @param maxNumExecutorsNeeded the maximum number of executors all currently running or pending
-   *                              tasks could fill
-   * @param rpId                  the ResourceProfile id of the executors
-   * @return the number of additional executors actually requested.
+   * @param maxNumExecutorsNeeded 当前所有运行中/待处理任务能填满的最大 Executor 数
+   * @param rpId ResourceProfile 的 ID
+   * @return 实际请求的额外 Executor 数
    */
   private def addExecutors(maxNumExecutorsNeeded: Int, rpId: Int): Int = {
     val oldNumExecutorsTarget = numExecutorsTargetPerResourceProfileId(rpId)
-    // Do not request more executors if it would put our target over the upper bound
-    // this is doing a max check per ResourceProfile
+    // 已达上限则不再请求，重置步长
     if (oldNumExecutorsTarget >= maxNumExecutors) {
       logDebug("Not adding executors because our current target total " +
         s"is already ${oldNumExecutorsTarget} (limit $maxNumExecutors)")
       numExecutorsToAddPerResourceProfileId(rpId) = 1
       return 0
     }
-    // There's no point in wasting time ramping up to the number of executors we already have, so
-    // make sure our target is at least as much as our current allocation:
+    // 确保目标不低于当前实际拥有的 Executor 数，避免无意义的爬升过程
     var numExecutorsTarget = math.max(numExecutorsTargetPerResourceProfileId(rpId),
         executorMonitor.executorCountWithResourceProfile(rpId))
-    // Boost our target with the number to add for this round:
+    // 按指数步长增加
     numExecutorsTarget += numExecutorsToAddPerResourceProfileId(rpId)
-    // Ensure that our target doesn't exceed what we need at the present moment:
+    // 不超过当前实际需求
     numExecutorsTarget = math.min(numExecutorsTarget, maxNumExecutorsNeeded)
-    // Ensure that our target fits within configured bounds:
+    // 确保在配置的上下限范围内
     numExecutorsTarget = math.max(math.min(numExecutorsTarget, maxNumExecutors), minNumExecutors)
     val delta = numExecutorsTarget - oldNumExecutorsTarget
     numExecutorsTargetPerResourceProfileId(rpId) = numExecutorsTarget
 
-    // If our target has not changed, do not send a message
-    // to the cluster manager and reset our exponential growth
+    // 目标未变化时重置指数增长步长
     if (delta == 0) {
       numExecutorsToAddPerResourceProfileId(rpId) = 1
     }
@@ -535,8 +469,9 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * Request the cluster manager to remove the given executors.
-   * Returns the list of executors which are removed.
+   * 请求集群管理器移除指定的 Executor 列表。
+   * 会检查每个 Executor 的移除是否会违反最小数量限制或低于目标数，不满足条件则跳过。
+   * @return 实际被移除的 Executor ID 列表
    */
   private def removeExecutors(executors: Seq[(String, Int)]): Seq[String] = synchronized {
     val executorIdsToBeRemoved = new ArrayBuffer[String]
@@ -550,17 +485,19 @@ private[spark] class ExecutorAllocationManager(
         logWarning(log"Not removing executor ${MDC(EXECUTOR_IDS, executorIdToBeRemoved)} " +
           log"because the ResourceProfile was UNKNOWN!")
       } else {
-        // get the running total as we remove or initialize it to the count - pendingRemoval
+        // 初始化该 ResourceProfile 的可用 Executor 总数（排除待移除和正在退役的）
         val newExecutorTotal = numExecutorsTotalPerRpId.getOrElseUpdate(rpId,
           (executorMonitor.executorCountWithResourceProfile(rpId) -
             executorMonitor.pendingRemovalCountPerResourceProfileId(rpId) -
             executorMonitor.decommissioningPerResourceProfileId(rpId)
           ))
         if (newExecutorTotal - 1 < minNumExecutors) {
+          // 移除后会低于最小 Executor 数限制，跳过
           logDebug(s"Not removing idle executor $executorIdToBeRemoved because there " +
             s"are only $newExecutorTotal executor(s) left (minimum number of executor limit " +
             s"$minNumExecutors)")
         } else if (newExecutorTotal - 1 < numExecutorsTargetPerResourceProfileId(rpId)) {
+          // 移除后会低于目标 Executor 数，跳过
           logDebug(s"Not removing idle executor $executorIdToBeRemoved because there " +
             s"are only $newExecutorTotal executor(s) left (number of executor " +
             s"target ${numExecutorsTargetPerResourceProfileId(rpId)})")
@@ -575,13 +512,13 @@ private[spark] class ExecutorAllocationManager(
       return Seq.empty[String]
     }
 
-    // Send a request to the backend to kill this executor(s)
+    // 向后端发送 kill/decommission 请求
     val executorsRemoved = if (testing) {
       executorIdsToBeRemoved
     } else {
-      // We don't want to change our target number of executors, because we already did that
-      // when the task backlog decreased.
+      // 不调整目标数（已在任务积压减少时调整过了）
       if (decommissionEnabled) {
+        // 优雅退役模式：发送退役请求而非直接 kill
         val executorIdsWithoutHostLoss = executorIdsToBeRemoved.map(
           id => (id, ExecutorDecommissionInfo("spark scale down"))).toArray
         client.decommissionExecutors(
@@ -594,15 +531,14 @@ private[spark] class ExecutorAllocationManager(
       }
     }
 
-    // [SPARK-21834] killExecutors api reduces the target number of executors.
-    // So we need to update the target with desired value.
+    // [SPARK-21834] killExecutors API 会减少目标数，需要重新同步为期望值
     client.requestTotalExecutors(
       numExecutorsTargetPerResourceProfileId.toMap,
       numLocalityAwareTasksPerResourceProfileId.toMap,
       rpIdToHostToLocalTaskCount)
 
-    // reset the newExecutorTotal to the existing number of executors
     if (testing || executorsRemoved.nonEmpty) {
+      // 通知 executorMonitor 更新内部状态（退役或已 kill）
       if (decommissionEnabled) {
         executorMonitor.executorsDecommissioned(executorsRemoved.toSeq)
       } else {
@@ -620,9 +556,8 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * Callback invoked when the scheduler receives new pending tasks.
-   * This sets a time in the future that decides when executors should be added
-   * if it is not already set.
+   * 调度器收到新的待处理任务时触发。
+   * 如果添加定时器尚未设置，则设置一个未来的时间点用于决定何时增加 Executor。
    */
   private def onSchedulerBacklogged(): Unit = synchronized {
     if (addTime == NOT_SET) {
@@ -633,54 +568,51 @@ private[spark] class ExecutorAllocationManager(
   }
 
   /**
-   * Callback invoked when the scheduler queue is drained.
-   * This resets all variables used for adding executors.
+   * 调度器队列清空时触发。
+   * 重置所有与增加 Executor 相关的状态变量。
    */
   private def onSchedulerQueueEmpty(): Unit = synchronized {
     logDebug("Clearing timer to add executors because there are no more pending tasks")
     addTime = NOT_SET
+    // 所有 ResourceProfile 的指数增长步长重置为 1
     numExecutorsToAddPerResourceProfileId.mapValuesInPlace { case (_, _) => 1 }
   }
 
+  // 封装 Stage 尝试标识（stageId + attemptId）
   private case class StageAttempt(stageId: Int, stageAttemptId: Int) {
     override def toString: String = s"Stage $stageId (Attempt $stageAttemptId)"
   }
 
   /**
-   * A listener that notifies the given allocation manager of when to add and remove executors.
+   * SparkListener 实现，监听调度事件并通知 ExecutorAllocationManager 何时增减 Executor。
    *
-   * This class is intentionally conservative in its assumptions about the relative ordering
-   * and consistency of events returned by the listener.
+   * 对事件的相对顺序和一致性采取保守假设，不依赖特定事件到达顺序。
    */
   private[spark] class ExecutorAllocationListener extends SparkListener {
 
+    // Stage 尝试 → 该 Stage 的总任务数
     private val stageAttemptToNumTasks = new mutable.HashMap[StageAttempt, Int]
-    // Number of running tasks per stageAttempt including speculative tasks.
-    // Should be 0 when no stages are active.
+    // Stage 尝试 → 正在运行的任务数（含推测任务），无活跃 Stage 时应为 0
     private val stageAttemptToNumRunningTask = new mutable.HashMap[StageAttempt, Int]
+    // Stage 尝试 → 已启动的普通任务索引集合
     private val stageAttemptToTaskIndices = new mutable.HashMap[StageAttempt, mutable.HashSet[Int]]
-    // Map from each stageAttempt to a set of running speculative task indexes
-    // TODO(SPARK-41192): We simply need an Int for this.
+    // Stage 尝试 → 正在运行的推测任务索引集合
     private val stageAttemptToSpeculativeTaskIndices =
       new mutable.HashMap[StageAttempt, mutable.HashSet[Int]]()
-    // Map from each stageAttempt to a set of pending speculative task indexes
+    // Stage 尝试 → 待执行的推测任务索引集合
     private val stageAttemptToPendingSpeculativeTasks =
       new mutable.HashMap[StageAttempt, mutable.HashSet[Int]]
 
+    // ResourceProfile ID → 该 Profile 下的活跃 Stage 集合
     private val resourceProfileIdToStageAttempt =
       new mutable.HashMap[Int, mutable.Set[StageAttempt]]
 
-    // Keep track of unschedulable task sets because of executor/node exclusions from too many task
-    // failures. This is a Set of StageAttempt's because we'll only take the last unschedulable task
-    // in a taskset although there can be more. This is done in order to avoid costly loops in the
-    // scheduling. Check TaskSetManager#getCompletelyExcludedTaskIfAny for more details.
+    // 因任务失败过多导致 Executor/节点被排除而无法调度的 TaskSet 集合
+    // 每个 TaskSet 只记录最后一个不可调度任务以避免调度中的高成本循环
     private val unschedulableTaskSets = new mutable.HashSet[StageAttempt]
 
-    // stageAttempt to tuple (the number of task with locality preferences, a map where each pair
-    // is a node and the number of tasks that would like to be scheduled on that node, and
-    // the resource profile id) map,
-    // maintain the executor placement hints for each stageAttempt used by resource framework
-    // to better place the executors.
+    // Stage 尝试 → (有本地性偏好的任务数, 节点→本地性任务数的映射, ResourceProfile ID)
+    // 用于为资源框架提供 Executor 放置提示
     private val stageAttemptToExecutorPlacementHints =
       new mutable.HashMap[StageAttempt, (Int, Map[String, Int], Int)]
 
@@ -731,14 +663,13 @@ private[spark] class ExecutorAllocationManager(
       }
     }
 
+    // Stage 完成时触发：清理该 Stage 相关的各项追踪数据
     override def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit = {
       val stageId = stageCompleted.stageInfo.stageId
       val stageAttemptId = stageCompleted.stageInfo.attemptNumber()
       val stageAttempt = StageAttempt(stageId, stageAttemptId)
       allocationManager.synchronized {
-        // do NOT remove stageAttempt from stageAttemptToNumRunningTask
-        // because the attempt may still have running tasks,
-        // even after another attempt for the stage is submitted.
+        // 不从 stageAttemptToNumRunningTask 中移除，因为该尝试可能仍有运行中的任务
         stageAttemptToNumTasks -= stageAttempt
         stageAttemptToPendingSpeculativeTasks -= stageAttempt
         stageAttemptToTaskIndices -= stageAttempt
@@ -746,11 +677,9 @@ private[spark] class ExecutorAllocationManager(
         stageAttemptToExecutorPlacementHints -= stageAttempt
         removeStageFromResourceProfileIfUnused(stageAttempt)
 
-        // Update the executor placement hints
         updateExecutorPlacementHints()
 
-        // If this is the last stage with pending tasks, mark the scheduler queue as empty
-        // This is needed in case the stage is aborted for any reason
+        // 如果所有 Stage 的待处理任务都已清空，标记调度器队列为空
         if (stageAttemptToNumTasks.isEmpty
           && stageAttemptToPendingSpeculativeTasks.isEmpty
           && stageAttemptToSpeculativeTaskIndices.isEmpty) {
@@ -759,6 +688,7 @@ private[spark] class ExecutorAllocationManager(
       }
     }
 
+    // 任务启动时触发：更新运行中任务计数，区分普通任务和推测任务
     override def onTaskStart(taskStart: SparkListenerTaskStart): Unit = {
       val stageId = taskStart.stageId
       val stageAttemptId = taskStart.stageAttemptId
@@ -767,8 +697,8 @@ private[spark] class ExecutorAllocationManager(
       allocationManager.synchronized {
         stageAttemptToNumRunningTask(stageAttempt) =
           stageAttemptToNumRunningTask.getOrElse(stageAttempt, 0) + 1
-        // If this is the last pending task, mark the scheduler queue as empty
         if (taskStart.taskInfo.speculative) {
+          // 推测任务启动：加入运行中推测集合，从待执行推测集合中移除
           stageAttemptToSpeculativeTaskIndices.getOrElseUpdate(stageAttempt,
             new mutable.HashSet[Int]) += taskIndex
           stageAttemptToPendingSpeculativeTasks
@@ -777,12 +707,14 @@ private[spark] class ExecutorAllocationManager(
           stageAttemptToTaskIndices.getOrElseUpdate(stageAttempt,
             new mutable.HashSet[Int]) += taskIndex
         }
+        // 如果没有更多待处理任务，标记队列为空
         if (!hasPendingTasks) {
           allocationManager.onSchedulerQueueEmpty()
         }
       }
     }
 
+    // 任务结束时触发：递减运行中任务计数，根据结束原因决定是否需要标记积压
     override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
       val stageId = taskEnd.stageId
       val stageAttemptId = taskEnd.stageAttemptId
@@ -802,30 +734,26 @@ private[spark] class ExecutorAllocationManager(
 
         taskEnd.reason match {
           case Success =>
-            // Remove pending speculative task in case the normal task
-            // is finished before starting the speculative task
+            // 普通任务成功完成时，移除同索引的待执行推测任务（推测任务已无必要）
             stageAttemptToPendingSpeculativeTasks.get(stageAttempt).foreach(_.remove(taskIndex))
           case _: TaskKilled =>
+            // 被主动 kill 的任务不做额外处理
           case _ =>
+            // 任务失败（非主动 kill），预期会被重新提交
+            // 如果队列为空，需重新标记为积压以确保有足够资源运行重试任务（SPARK-8366）
             if (!hasPendingTasks) {
-              // If the task failed (not intentionally killed), we expect it to be resubmitted
-              // later. To ensure we have enough resources to run the resubmitted task, we need to
-              // mark the scheduler as backlogged again if it's not already marked as such
-              // (SPARK-8366)
               allocationManager.onSchedulerBacklogged()
             }
             if (!taskEnd.taskInfo.speculative) {
-              // If a non-speculative task is intentionally killed, it means the speculative task
-              // has succeeded, and no further task of this task index will be resubmitted. In this
-              // case, the task index is completed and we shouldn't remove it from
-              // stageAttemptToTaskIndices. Otherwise, we will have a pending non-speculative task
-              // for the task index (SPARK-30511)
+              // 非推测任务失败需从已完成索引集中移除，使其重新变为待处理状态
+              // 推测任务被 kill 说明对应的推测任务已成功，不应移除索引（SPARK-30511）
               stageAttemptToTaskIndices.get(stageAttempt).foreach {_.remove(taskIndex)}
             }
         }
       }
     }
 
+    // 推测任务被提交时触发：加入待执行推测集合，标记调度器有积压
     override def onSpeculativeTaskSubmitted(speculativeTask: SparkListenerSpeculativeTaskSubmitted)
       : Unit = {
       val stageId = speculativeTask.stageId
@@ -839,6 +767,7 @@ private[spark] class ExecutorAllocationManager(
       }
     }
 
+    // 出现不可调度的 TaskSet 时触发（因 Executor/节点排除）：记录并标记积压
     override def onUnschedulableTaskSetAdded(
         unschedulableTaskSetAdded: SparkListenerUnschedulableTaskSetAdded): Unit = {
       val stageId = unschedulableTaskSetAdded.stageId
@@ -850,18 +779,19 @@ private[spark] class ExecutorAllocationManager(
       }
     }
 
+    // 不可调度状态解除时触发：从集合中移除
     override def onUnschedulableTaskSetRemoved(
         unschedulableTaskSetRemoved: SparkListenerUnschedulableTaskSetRemoved): Unit = {
       val stageId = unschedulableTaskSetRemoved.stageId
       val stageAttemptId = unschedulableTaskSetRemoved.stageAttemptId
       val stageAttempt = StageAttempt(stageId, stageAttemptId)
       allocationManager.synchronized {
-        // Clear unschedulableTaskSets since atleast one task becomes schedulable now
         unschedulableTaskSets.remove(stageAttempt)
         removeStageFromResourceProfileIfUnused(stageAttempt)
       }
     }
 
+    // 当 Stage 确认无任何运行中/待处理任务时，从 ResourceProfile→Stage 映射中移除
     def removeStageFromResourceProfileIfUnused(stageAttempt: StageAttempt): Unit = {
       if (!stageAttemptToNumRunningTask.contains(stageAttempt) &&
           !stageAttemptToNumTasks.contains(stageAttempt) &&
@@ -873,10 +803,9 @@ private[spark] class ExecutorAllocationManager(
           v.contains(stageAttempt)
         }.keys
         if (rpForStage.size == 1) {
-          // be careful about the removal from here due to late tasks, make sure stage is
-          // really complete and no tasks left
           resourceProfileIdToStageAttempt(rpForStage.head) -= stageAttempt
         } else {
+          // 一个 Stage 应恰好关联一个 ResourceProfile，否则属于异常情况
           logWarning(log"Should have exactly one resource profile for stage " +
             log"${MDC(STAGE_ATTEMPT, stageAttempt)}, but have " +
             log"${MDC(RESOURCE_PROFILE_IDS, rpForStage)}")
@@ -885,32 +814,35 @@ private[spark] class ExecutorAllocationManager(
     }
 
     /**
-     * An estimate of the total number of pending tasks remaining for currently running stages. Does
-     * not account for tasks which may have failed and been resubmitted.
-     *
-     * Note: This is not thread-safe without the caller owning the `allocationManager` lock.
+     * 估算指定 ResourceProfile 下所有活跃 Stage 的剩余待处理任务数。
+     * 不考虑可能已失败并被重新提交的任务。
+     * 注意：调用方需持有 allocationManager 锁。
      */
     def pendingTasksPerResourceProfile(rpId: Int): Int = {
       val attempts = resourceProfileIdToStageAttempt.getOrElse(rpId, Set.empty).toSeq
       attempts.map(attempt => getPendingTaskSum(attempt)).sum
     }
 
+    // 是否存在待处理的普通任务
     def hasPendingRegularTasks: Boolean = {
       val attemptSets = resourceProfileIdToStageAttempt.values
       attemptSets.exists(attempts => attempts.exists(getPendingTaskSum(_) > 0))
     }
 
+    // 计算指定 Stage 尝试的待处理普通任务数 = 总任务数 - 已启动任务数
     private def getPendingTaskSum(attempt: StageAttempt): Int = {
       val numTotalTasks = stageAttemptToNumTasks.getOrElse(attempt, 0)
       val numRunning = stageAttemptToTaskIndices.get(attempt).map(_.size).getOrElse(0)
       numTotalTasks - numRunning
     }
 
+    // 估算指定 ResourceProfile 下待执行的推测任务数
     def pendingSpeculativeTasksPerResourceProfile(rp: Int): Int = {
       val attempts = resourceProfileIdToStageAttempt.getOrElse(rp, Set.empty).toSeq
       attempts.map(attempt => getPendingSpeculativeTaskSum(attempt)).sum
     }
 
+    // 是否存在待处理的推测任务
     def hasPendingSpeculativeTasks: Boolean = {
       val attemptSets = resourceProfileIdToStageAttempt.values
       attemptSets.exists { attempts =>
@@ -923,34 +855,31 @@ private[spark] class ExecutorAllocationManager(
     }
 
     /**
-     * Currently we only know when a task set has an unschedulable task, we don't know
-     * the exact number and since the allocation manager isn't tied closely with the scheduler,
-     * we use the number of tasks sets that are unschedulable as a heuristic to add more executors.
+     * 统计指定 ResourceProfile 下不可调度的 TaskSet 数量。
+     * 由于无法精确得知不可调度任务的数量，以 TaskSet 数作为启发式指标。
      */
     def pendingUnschedulableTaskSetsPerResourceProfile(rp: Int): Int = {
       val attempts = resourceProfileIdToStageAttempt.getOrElse(rp, Set.empty).toSeq
       attempts.count(attempt => unschedulableTaskSets.contains(attempt))
     }
 
+    // 是否存在任何待处理任务（普通 + 推测）
     def hasPendingTasks: Boolean = {
       hasPendingSpeculativeTasks || hasPendingRegularTasks
     }
 
+    // 统计指定 ResourceProfile 下所有活跃 Stage 的运行中任务总数
     def totalRunningTasksPerResourceProfile(rp: Int): Int = {
       val attempts = resourceProfileIdToStageAttempt.getOrElse(rp, Set.empty).toSeq
-      // attempts is a Set, change to Seq so we keep all values
       attempts.map { attempt =>
         stageAttemptToNumRunningTask.getOrElse(attempt, 0)
       }.sum
     }
 
     /**
-     * Update the Executor placement hints (the number of tasks with locality preferences,
-     * a map where each pair is a node and the number of tasks that would like to be scheduled
-     * on that node).
-     *
-     * These hints are updated when stages arrive and complete, so are not up-to-date at task
-     * granularity within stages.
+     * 汇总所有活跃 Stage 的 Executor 放置提示信息。
+     * 按 ResourceProfile 分组统计有本地性偏好的任务数和各节点的任务数，
+     * 供集群管理器在分配 Executor 时参考以优化数据本地性。
      */
     def updateExecutorPlacementHints(): Unit = {
       val localityAwareTasksPerResourceProfileId = new mutable.HashMap[Int, Int]
@@ -979,17 +908,15 @@ private[spark] class ExecutorAllocationManager(
 }
 
 /**
- * Metric source for ExecutorAllocationManager to expose its internal executor allocation
- * status to MetricsSystem.
- * Note: These metrics heavily rely on the internal implementation of
- * ExecutorAllocationManager, metrics or value of metrics will be changed when internal
- * implementation is changed, so these metrics are not stable across Spark version.
+ * ExecutorAllocationManager 的指标数据源，向 Spark MetricsSystem 暴露内部 Executor 分配状态。
+ * 注意：这些指标深度依赖 ExecutorAllocationManager 的内部实现，跨 Spark 版本可能不稳定。
  */
 private[spark] class ExecutorAllocationManagerSource(
     executorAllocationManager: ExecutorAllocationManager) extends Source {
   val sourceName = "ExecutorAllocationManager"
   val metricRegistry = new MetricRegistry()
 
+  // 注册 Gauge 指标的通用方法，带空值保护
   private def registerGauge[T](name: String, value: => T, defaultValue: T): Unit = {
     metricRegistry.register(MetricRegistry.name("executors", name), new Gauge[T] {
       override def getValue: T = synchronized { Option(value).getOrElse(defaultValue) }
@@ -1000,12 +927,13 @@ private[spark] class ExecutorAllocationManagerSource(
     metricRegistry.counter(MetricRegistry.name("executors", name))
   }
 
+  // 计数器：优雅退役、未完成退役、被 Driver kill、意外退出的 Executor 数量
   val gracefullyDecommissioned: Counter = getCounter("numberExecutorsGracefullyDecommissioned")
   val decommissionUnfinished: Counter = getCounter("numberExecutorsDecommissionUnfinished")
   val driverKilled: Counter = getCounter("numberExecutorsKilledByDriver")
   val exitedUnexpectedly: Counter = getCounter("numberExecutorsExitedUnexpectedly")
 
-  // The metrics are going to return the sum for all the different ResourceProfiles.
+  // 以下 Gauge 指标返回所有 ResourceProfile 的汇总值
   registerGauge("numberExecutorsToAdd",
     executorAllocationManager.numExecutorsToAddPerResourceProfileId.values.sum, 0)
   registerGauge("numberExecutorsPendingToRemove",
@@ -1021,10 +949,12 @@ private[spark] class ExecutorAllocationManagerSource(
     executorAllocationManager.executorMonitor.decommissioningCount, 0)
 }
 
+// ExecutorAllocationManager 伴生对象，存放常量和辅助类
 private object ExecutorAllocationManager {
+  // 表示"未设置"的哨兵值，用于 addTime
   val NOT_SET = Long.MaxValue
 
-  // helper case class for requesting executors, here to be visible for testing
+  // 辅助 case class：记录目标 Executor 数量的变化量和变化前的旧值，便于测试和回滚
   private[spark] case class TargetNumUpdates(delta: Int, oldNumExecutorsTarget: Int)
 
 }
