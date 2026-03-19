@@ -76,12 +76,12 @@ case object Resubmitted extends TaskFailedReason {
 
 /**
  * :: DeveloperApi ::
- * Task failed to fetch shuffle data from a remote node. Probably means we have lost the remote
- * executors the task is trying to fetch from, and thus need to rerun the previous stage.
+ * 任务从远程节点拉取 Shuffle 数据失败。
+ * 通常说明远程 Executor 已丢失，需要重新运行前一个 Stage。
  */
 @DeveloperApi
 case class FetchFailed(
-    bmAddress: BlockManagerId,  // Note that bmAddress can be null
+    bmAddress: BlockManagerId,  // 注意：bmAddress 可能为 null
     shuffleId: Int,
     mapId: Long,
     mapIndex: Int,
@@ -109,19 +109,12 @@ case class FetchFailed(
 
 /**
  * :: DeveloperApi ::
- * Task failed due to a runtime exception. This is the most common failure case and also captures
- * user program exceptions.
+ * 任务因运行时异常失败，这是最常见的失败类型，也捕获用户程序异常。
  *
- * `stackTrace` contains the stack trace of the exception itself. It still exists for backward
- * compatibility. It's better to use `this(e: Throwable, metrics: Option[TaskMetrics])` to
- * create `ExceptionFailure` as it will handle the backward compatibility properly.
- *
- * `fullStackTrace` is a better representation of the stack trace because it contains the whole
- * stack trace including the exception and its causes
- *
- * `exception` is the actual exception that caused the task to fail. It may be `None` in
- * the case that the exception is not in fact serializable. If a task fails more than
- * once (due to retries), `exception` is that one that caused the last failure.
+ * stackTrace 保留异常自身的堆栈（为向后兼容而存在）。
+ * fullStackTrace 包含完整堆栈（含原因链），是更好的表示。
+ * exception 是实际导致失败的异常，如果不可序列化则为 None。
+ * 如果任务因重试多次失败，exception 是最后一次的异常。
  */
 @DeveloperApi
 case class ExceptionFailure(
@@ -136,9 +129,8 @@ case class ExceptionFailure(
   extends TaskFailedReason {
 
   /**
-   * `preserveCause` is used to keep the exception itself so it is available to the
-   * driver. This may be set to `false` in the event that the exception is not in fact
-   * serializable.
+   * preserveCause 控制是否保留原始异常供 Driver 使用。
+   * 当异常不可序列化时会设为 false。
    */
   private[spark] def this(
       e: Throwable,
@@ -174,8 +166,7 @@ case class ExceptionFailure(
     }
 
   /**
-   * Return a nice string representation of the exception, including the stack trace.
-   * Note: It does not include the exception's causes, and is only used for backward compatibility.
+   * 格式化异常的字符串表示（不含原因链），仅用于向后兼容。
    */
   private def exceptionString(
       className: String,
@@ -188,9 +179,8 @@ case class ExceptionFailure(
 }
 
 /**
- * A class for recovering from exceptions when deserializing a Throwable that was
- * thrown in user task code. If the Throwable cannot be deserialized it will be null,
- * but the stacktrace and message will be preserved correctly in SparkException.
+ * Throwable 序列化包装器，用于安全地反序列化用户任务中抛出的异常。
+ * 如果 Throwable 无法反序列化则置为 null，但堆栈和消息会通过 SparkException 正确保留。
  */
 private[spark] class ThrowableSerializationWrapper(var exception: Throwable) extends
     Serializable with Logging {
@@ -208,8 +198,7 @@ private[spark] class ThrowableSerializationWrapper(var exception: Throwable) ext
 
 /**
  * :: DeveloperApi ::
- * The task finished successfully, but the result was lost from the executor's block manager before
- * it was fetched.
+ * 任务成功完成，但结果在被获取前从 Executor 的 BlockManager 中丢失。
  */
 @DeveloperApi
 case object TaskResultLost extends TaskFailedReason {
@@ -218,7 +207,7 @@ case object TaskResultLost extends TaskFailedReason {
 
 /**
  * :: DeveloperApi ::
- * Task was killed intentionally and needs to be rescheduled.
+ * 任务被主动 kill，需要重新调度。不计入失败次数。
  */
 @DeveloperApi
 case class TaskKilled(
@@ -235,7 +224,8 @@ case class TaskKilled(
 
 /**
  * :: DeveloperApi ::
- * Task requested the driver to commit, but was denied.
+ * 任务请求 Driver 提交输出，但被拒绝。
+ * 不计入失败次数，避免推测执行场景中大量被拒绝的任务导致 Stage 虚假失败。
  */
 @DeveloperApi
 case class TaskCommitDenied(
@@ -244,18 +234,14 @@ case class TaskCommitDenied(
     attemptNumber: Int) extends TaskFailedReason {
   override def toErrorString: String = "TaskCommitDenied (Driver denied task commit)" +
     s" for job: $jobID, partition: $partitionID, attemptNumber: $attemptNumber"
-  /**
-   * If a task failed because its attempt to commit was denied, do not count this failure
-   * towards failing the stage. This is intended to prevent spurious stage failures in cases
-   * where many speculative tasks are launched and denied to commit.
-   */
+  // 提交被拒不计入失败次数
   override def countTowardsTaskFailures: Boolean = false
 }
 
 /**
  * :: DeveloperApi ::
- * The task failed because the executor that it was running on was lost. This may happen because
- * the task crashed the JVM.
+ * 任务因其运行的 Executor 丢失而失败（可能是任务崩溃了 JVM）。
+ * exitCausedByApp 为 true 表示退出由应用任务导致，此时计入失败次数。
  */
 @DeveloperApi
 case class ExecutorLostFailure(
@@ -277,8 +263,7 @@ case class ExecutorLostFailure(
 
 /**
  * :: DeveloperApi ::
- * We don't know why the task ended -- for example, because of a ClassNotFound exception when
- * deserializing the task result.
+ * 未知的任务结束原因——例如反序列化任务结果时出现 ClassNotFound 异常。
  */
 @DeveloperApi
 case object UnknownReason extends TaskFailedReason {
