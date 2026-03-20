@@ -1707,18 +1707,23 @@ private[spark] class Executor(
   }
 }
 
+/**
+ * Executor 伴生对象，包含常量和工具方法。
+ */
 private[spark] object Executor extends Logging {
+  // 任务执行线程名称前缀
   val TASK_THREAD_NAME_PREFIX = "Executor task launch worker"
+  // 空闲任务线程名称
   val IDLE_TASK_THREAD_NAME = "Executor task idle worker"
 
-  // This is reserved for internal use by components that need to read task properties before a
-  // task is fully deserialized. When possible, the TaskContext.getLocalProperty call should be
-  // used instead.
+  // 保留给内部使用，用于在任务完全反序列化之前读取任务属性。
+  // 如果可能，应该使用 TaskContext.getLocalProperty 调用替代。
   val taskDeserializationProps: ThreadLocal[Properties] = new ThreadLocal[Properties]
 
-  // Used to store executorSource, for local mode only
+  // 仅用于存储本地模式的 executorSource
   var executorSourceLocalModeOnly: ExecutorSource = null
 
+  // 检查 MDC（Mapped Diagnostic Context）是否受支持
   lazy val mdcIsSupported: Boolean = {
     try {
       // This tests if any class initialization error is thrown
@@ -1735,13 +1740,13 @@ private[spark] object Executor extends Logging {
   }
 
   /**
-   * Whether a `Throwable` thrown from a task is a fatal error. We will use this to decide whether
-   * to kill the executor.
+   * 判断任务抛出的 Throwable 是否是致命错误。
+   * 我们将根据此决定是否终止 Executor。
    *
-   * @param depthToCheck The max depth of the exception chain we should search for a fatal error. 0
-   *                     means not checking any fatal error (in other words, return false), 1 means
-   *                     checking only the exception but not the cause, and so on. This is to avoid
-   *                     `StackOverflowError` when hitting a cycle in the exception chain.
+   * @param depthToCheck 搜索致命错误的异常链最大深度。
+   *                     0 表示不检查任何致命错误（即返回 false），
+   *                     1 表示只检查异常本身不检查原因，以此类推。
+   *                     这是为了在异常链中有循环时避免 StackOverflowError。
    */
   @scala.annotation.tailrec
   def isFatalError(t: Throwable, depthToCheck: Int): Boolean = {
@@ -1749,8 +1754,11 @@ private[spark] object Executor extends Logging {
       false
     } else {
       t match {
+        // SparkOutOfMemoryError 不被视为致命错误（可以继续运行其他任务）
         case _: SparkOutOfMemoryError => false
+        // 使用 Utils 中定义的致命错误判断
         case e if Utils.isFatalError(e) => true
+        // 递归检查原因异常
         case e if e.getCause != null => isFatalError(e.getCause, depthToCheck - 1)
         case _ => false
       }
@@ -1758,4 +1766,8 @@ private[spark] object Executor extends Logging {
   }
 }
 
+/**
+ * 当任务被 TaskReaper 终止时抛出的异常。
+ * 表示任务在指定超时时间内无法正常停止，需要强制终止 Executor JVM。
+ */
 class KilledByTaskReaperException(message: String) extends SparkException(message)
