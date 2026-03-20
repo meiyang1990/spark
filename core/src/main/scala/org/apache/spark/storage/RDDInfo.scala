@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -36,10 +37,11 @@ class RDDInfo(
     val outputDeterministicLevel: DeterministicLevel.Value = DeterministicLevel.DETERMINATE)
   extends Ordered[RDDInfo] {
 
-  var numCachedPartitions = 0
-  var memSize = 0L
-  var diskSize = 0L
+  var numCachedPartitions = 0  // 已缓存的分区数
+  var memSize = 0L             // 内存占用大小
+  var diskSize = 0L            // 磁盘占用大小
 
+  // 判断 RDD 是否已被缓存
   def isCached: Boolean = (memSize + diskSize > 0) && numCachedPartitions > 0
 
   override def toString: String = {

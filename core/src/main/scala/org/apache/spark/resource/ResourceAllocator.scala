@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -22,37 +23,21 @@ import scala.collection.mutable
 import org.apache.spark.SparkException
 import org.apache.spark.resource.ResourceAmountUtils.ONE_ENTIRE_RESOURCE
 
+/**
+ * ResourceAmountUtils - 资源数量工具类
+ * 
+ * 解决浮点数精度问题：
+ * 使用 double 进行资源计算可能遇到精度损失。例如将 1.0 分配给 9 个任务（每个 1.0/9），
+ * 由于浮点数精度问题，最后一个任务无法分配（剩余 0.111... 小于 0.111...）。
+ * 
+ * 解决方案：
+ * 将 double 乘以 ONE_ENTIRE_RESOURCE (10^16) 转换为 long，避免精度损失。
+ * Double 最多显示 16 位小数，因此使用 10^16 作为缩放因子。
+ */
 private[spark] object ResourceAmountUtils {
   /**
-   * Using "double" to do the resource calculation may encounter a problem of precision loss. Eg
-   *
-   * scala&gt; val taskAmount = 1.0 / 9
-   * taskAmount: Double = 0.1111111111111111
-   *
-   * scala&gt; var total = 1.0
-   * total: Double = 1.0
-   *
-   * scala&gt; for (i &lt;- 1 to 9 ) {
-   * |   if (total &gt;= taskAmount) {
-   * |           total -= taskAmount
-   * |           println(s"assign $taskAmount for task $i, total left: $total")
-   * |   } else {
-   * |           println(s"ERROR Can't assign $taskAmount for task $i, total left: $total")
-   * |   }
-   * | }
-   * assign 0.1111111111111111 for task 1, total left: 0.8888888888888888
-   * assign 0.1111111111111111 for task 2, total left: 0.7777777777777777
-   * assign 0.1111111111111111 for task 3, total left: 0.6666666666666665
-   * assign 0.1111111111111111 for task 4, total left: 0.5555555555555554
-   * assign 0.1111111111111111 for task 5, total left: 0.44444444444444425
-   * assign 0.1111111111111111 for task 6, total left: 0.33333333333333315
-   * assign 0.1111111111111111 for task 7, total left: 0.22222222222222204
-   * assign 0.1111111111111111 for task 8, total left: 0.11111111111111094
-   * ERROR Can't assign 0.1111111111111111 for task 9, total left: 0.11111111111111094
-   *
-   * So we multiply ONE_ENTIRE_RESOURCE to convert the double to long to avoid this limitation.
-   * Double can display up to 16 decimal places, so we set the factor to
-   * 10, 000, 000, 000, 000, 000L.
+   * 表示一个完整资源的内部单位（10^16）
+   * 用于将 double 转换为 long 以避免浮点数精度问题
    */
   final val ONE_ENTIRE_RESOURCE: Long = 10000000000000000L
 
@@ -65,8 +50,21 @@ private[spark] object ResourceAmountUtils {
 }
 
 /**
- * Trait used to help executor/worker allocate resources.
- * Please note that this is intended to be used in a single thread.
+ * ResourceAllocator - 资源分配器 Trait
+ * 
+ * 帮助 Executor/Worker 分配和管理资源（如 GPU、FPGA）。
+ * 
+ * 核心功能：
+ * 1. 跟踪每个资源地址的可用性（默认 1.0，支持分数资源）
+ * 2. acquire()：为任务获取资源地址
+ * 3. release()：任务完成后释放资源地址
+ * 
+ * 设计要点：
+ * - 使用内部单位（乘以 ONE_ENTIRE_RESOURCE）避免浮点数精度问题
+ * - 地址可用性 > 0 表示可用，= 0 表示已完全分配
+ * - 支持分数资源（如 0.5 表示 2 个任务共享 1 个地址）
+ * 
+ * @note 此 trait 仅用于单线程环境
  */
 private[spark] trait ResourceAllocator {
 

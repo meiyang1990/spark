@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,12 +28,22 @@ import org.apache.spark.api.java.JavaSparkContext._
 import org.apache.spark.api.java.function.{Function2 => JFunction2}
 import org.apache.spark.rdd.NewHadoopRDD
 
+/**
+ * JavaNewHadoopRDD - 读取新版 Hadoop MapReduce API 数据的 Java 封装
+ * 
+ * 基于 org.apache.hadoop.mapreduce.* 包（新 API）读取数据的 RDD 封装。
+ * 与 JavaHadoopRDD 相比，使用新版 mapreduce API 而非旧版 mapred API。
+ */
 @DeveloperApi
 class JavaNewHadoopRDD[K, V](rdd: NewHadoopRDD[K, V])
     (implicit override val kClassTag: ClassTag[K], implicit override val vClassTag: ClassTag[V])
   extends JavaPairRDD[K, V](rdd) {
 
-  /** Maps over a partition, providing the InputSplit that was used as the base of the partition. */
+  /**
+   * Maps over a partition, providing the InputSplit that was used as the base of the partition.
+   * 
+   * 在遍历分区时同时暴露该分区对应的 InputSplit，用于访问文件路径等元数据
+   */
   @DeveloperApi
   def mapPartitionsWithInputSplit[R](
       f: JFunction2[InputSplit, java.util.Iterator[(K, V)], java.util.Iterator[R]],

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,9 +19,8 @@
 package org.apache.spark.storage
 
 /**
- * Exception thrown when a shuffle migration request is received but the ShuffleManager
- * has not been initialized yet on the target executor. The sender should retry the
- * migration request after a short delay.
+ * 当收到 shuffle 迁移请求但目标 executor 上的 ShuffleManager 尚未初始化时抛出的异常。
+ * 发送方应在短暂延迟后重试迁移请求。
  */
 class ShuffleManagerNotInitializedException(
     timeoutMs: Long) extends Exception(

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,13 +32,21 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.StatCounter
 import org.apache.spark.util.Utils
 
+/**
+ * JavaDoubleRDD - Java API 的 Double 类型 RDD 包装器
+ * 
+ * 封装了 Scala 的 RDD[Double]，为 Java 用户提供类型安全的 Double RDD 操作。
+ * 包含数值计算特有的统计聚合方法（sum、mean、variance 等）。
+ */
 class JavaDoubleRDD(val srdd: RDD[scala.Double])
   extends AbstractJavaRDDLike[JDouble, JavaDoubleRDD] {
 
   override val classTag: ClassTag[JDouble] = implicitly[ClassTag[JDouble]]
 
+  // 将 Scala Double 映射为 Java Double
   override val rdd: RDD[JDouble] = srdd.map(x => JDouble.valueOf(x))
 
+  // 将 RDD[JDouble] 重新包装为 JavaDoubleRDD
   override def wrapRDD(rdd: RDD[JDouble]): JavaDoubleRDD =
     new JavaDoubleRDD(rdd.map(_.doubleValue))
 
@@ -69,6 +78,7 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
    */
   def unpersist(blocking: Boolean): JavaDoubleRDD = fromRDD(srdd.unpersist(blocking))
 
+  // 覆盖 first() 以确保返回类型为 Double 而非 Object
   // first() has to be overridden here in order for its return type to be Double instead of Object.
   override def first(): JDouble = srdd.first()
 
@@ -159,7 +169,7 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
    */
   def intersection(other: JavaDoubleRDD): JavaDoubleRDD = fromRDD(srdd.intersection(other.srdd))
 
-  // Double RDD functions
+  // Double RDD functions - Double 类型特有的数值统计操作
 
   /** Add up the elements in this RDD. */
   def sum(): JDouble = srdd.sum()
@@ -244,6 +254,8 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
    *  buckets will be [0,50) [50,100]. bucketCount must be at least 1
    * If the RDD contains infinity, NaN throws an exception
    * If the elements in RDD do not vary (max == min) always returns a single bucket.
+   * 
+   * 根据数据的最小值和最大值，将数据均匀划分到 bucketCount 个桶中计算直方图
    */
   def histogram(bucketCount: Int): (Array[scala.Double], Array[Long]) = {
     val result = srdd.histogram(bucketCount)
@@ -266,6 +278,8 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
    * All NaN entries are treated the same. If you have a NaN bucket it must be
    * the maximum value of the last position and all NaN entries will be counted
    * in that bucket.
+   * 
+   * 使用用户提供的桶边界计算直方图（左开右闭，最后一个桶闭合）
    */
   def histogram(buckets: Array[scala.Double]): Array[Long] = {
     srdd.histogram(buckets, false)
@@ -282,6 +296,7 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
   }
 }
 
+// JavaDoubleRDD 伴生对象：提供 RDD 转换工具方法
 object JavaDoubleRDD {
   def fromRDD(rdd: RDD[scala.Double]): JavaDoubleRDD = new JavaDoubleRDD(rdd)
 

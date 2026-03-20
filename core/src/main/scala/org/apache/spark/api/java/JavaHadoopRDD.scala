@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,12 +28,21 @@ import org.apache.spark.api.java.JavaSparkContext._
 import org.apache.spark.api.java.function.{Function2 => JFunction2}
 import org.apache.spark.rdd.HadoopRDD
 
+/**
+ * JavaHadoopRDD - 读取 Hadoop InputFormat 数据的 Java API 封装
+ * 
+ * 为 Java 用户提供对 HadoopRDD 的访问，支持按分区遍历时访问底层 InputSplit。
+ */
 @DeveloperApi
 class JavaHadoopRDD[K, V](rdd: HadoopRDD[K, V])
     (implicit override val kClassTag: ClassTag[K], implicit override val vClassTag: ClassTag[V])
   extends JavaPairRDD[K, V](rdd) {
 
-  /** Maps over a partition, providing the InputSplit that was used as the base of the partition. */
+  /**
+   * Maps over a partition, providing the InputSplit that was used as the base of the partition.
+   * 
+   * 在遍历分区时同时暴露该分区对应的 InputSplit，用于访问文件路径等元数据
+   */
   @DeveloperApi
   def mapPartitionsWithInputSplit[R](
       f: JFunction2[InputSplit, java.util.Iterator[(K, V)], java.util.Iterator[R]],

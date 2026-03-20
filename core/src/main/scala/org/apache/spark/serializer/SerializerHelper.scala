@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -45,6 +46,13 @@ private[spark] object SerializerHelper extends Logging {
     cbbos.toChunkedByteBuffer
   }
 
+  /**
+   * 从 ChunkedByteBuffer 反序列化对象
+   * 
+   * @param serializerInstance 序列化器实例
+   * @param bytes 序列化的字节数据
+   * @return 反序列化后的对象
+   */
   def deserializeFromChunkedBuffer[T: ClassTag](
       serializerInstance: SerializerInstance,
       bytes: ChunkedByteBuffer): T = {

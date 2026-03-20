@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,9 +28,16 @@ import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.resource.ResourceProfile._
 
 /**
- * A set of Executor resource requests. This is used in conjunction with the ResourceProfile to
- * programmatically specify the resources needed for an RDD that will be applied at the
- * stage level.
+ * ExecutorResourceRequests - Executor 资源请求集合
+ * 
+ * 与 ResourceProfile 配合使用，以编程方式指定 RDD 在 Stage 级别所需的 Executor 资源。
+ * 
+ * 提供便捷的 API 来配置 Executor 的各种资源：
+ * 1. 内存资源：memory (堆内存)、offHeapMemory (堆外内存)、memoryOverhead、pysparkMemory
+ * 2. CPU 资源：cores（核心数）
+ * 3. 自定义资源：GPU、FPGA 等（通过 resource 方法）
+ * 
+ * 所有内存方法自动将字符串（如 "512m", "2g"）转换为 MiB 单位。
  */
 @Evolving
 @Since("3.1.0")

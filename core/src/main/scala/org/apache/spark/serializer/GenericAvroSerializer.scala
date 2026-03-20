@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -82,8 +83,8 @@ private[serializer] class GenericAvroSerializer[D <: GenericContainer]
   })
 
   /**
-   * Decompresses the schema into the actual in-memory object. Keeps an internal cache of already
-   * seen values so to limit the number of times that decompression has to be done.
+   * 解压缩 Schema 字节数组为内存对象
+   * 缓存已见过的值以减少重复解压缩
    */
   def decompress(schemaBytes: ByteBuffer): Schema = decompressCache.getOrElseUpdate(schemaBytes, {
     val bis = new ByteArrayInputStream(

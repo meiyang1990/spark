@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -17,7 +18,11 @@
 
 package org.apache.spark.api
 
-/** Spark Java programming APIs. */
+/**
+ * Spark Java programming APIs.
+ * 
+ * Spark 的 Java 编程 API 包
+ */
 package object java {
   // For package docs only
 }

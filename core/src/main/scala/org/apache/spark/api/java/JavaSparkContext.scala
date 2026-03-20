@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -39,11 +40,22 @@ import org.apache.spark.resource.ResourceInformation
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * A Java-friendly version of [[org.apache.spark.SparkContext]] that returns
- * [[org.apache.spark.api.java.JavaRDD]]s and works with Java collections instead of Scala ones.
+ * JavaSparkContext - Spark 的 Java API 入口点
+ * 
+ * 这是 SparkContext 的 Java 友好版本，返回 JavaRDD 而非 Scala RDD，
+ * 并与 Java 集合类型（而非 Scala 集合）协同工作。主要职责包括：
+ * 
+ * 1. 创建 RDD：从 Java 集合、文件系统、Hadoop InputFormat 等创建 RDD
+ * 2. 配置管理：管理 Spark 应用的配置参数
+ * 3. 资源控制：添加文件、JAR 依赖，控制并行度等
+ * 4. 作业管理：设置作业组、标签，取消作业等
+ * 
+ * 设计要点：
+ * - 封装 Scala SparkContext，提供类型安全的 Java API
+ * - 自动处理 Scala/Java 集合类型转换
+ * - 支持多种构造方式（从配置、系统属性等）
  *
- * @note Only one `SparkContext` should be active per JVM. You must `stop()` the
- *   active `SparkContext` before creating a new one.
+ * @note 每个 JVM 只能有一个活跃的 SparkContext。创建新实例前必须先 stop() 现有实例。
  */
 class JavaSparkContext(val sc: SparkContext) extends Closeable {
 

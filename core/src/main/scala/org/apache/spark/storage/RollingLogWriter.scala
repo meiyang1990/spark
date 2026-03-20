@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -81,6 +82,7 @@ private[spark] class RollingLogWriter(
     }
   }
 
+  // 滚动到新块：保存当前块并重置写入器
   def rollOver(): Unit = {
     // Save current block and reset the writer
     try {
@@ -90,6 +92,7 @@ private[spark] class RollingLogWriter(
     }
   }
 
+  // 关闭写入器
   def close(): Unit = {
     try {
       saveCurrentBlock()

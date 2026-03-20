@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -44,6 +45,26 @@ import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.Utils
 
+/**
+ * JavaPairRDD - 键值对类型的 Java RDD
+ * 
+ * 封装 Scala 的 RDD[(K, V)]，为 Java 提供键值对数据集的操作接口。
+ * 支持典型的 MapReduce 操作，包括：
+ * 
+ * 1. 聚合操作：reduceByKey、aggregateByKey、combineByKey、foldByKey
+ * 2. 分组操作：groupByKey、cogroup
+ * 3. 连接操作：join、leftOuterJoin、rightOuterJoin、fullOuterJoin
+ * 4. 排序操作：sortByKey、repartitionAndSortWithinPartitions
+ * 5. 转换操作：mapValues、flatMapValues、keys、values
+ * 
+ * 设计要点：
+ * - 所有返回集合的方法都转换为 Java 集合类型（JIterable、JMap 等）
+ * - 大部分聚合操作支持自定义分区器或指定分区数
+ * - 提供 map-side combine 优化（如 reduceByKey）
+ * 
+ * @param K 键类型
+ * @param V 值类型
+ */
 class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
                        (implicit val kClassTag: ClassTag[K], implicit val vClassTag: ClassTag[V])
   extends AbstractJavaRDDLike[(K, V), JavaPairRDD[K, V]] {

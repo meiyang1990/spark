@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -39,17 +40,32 @@ import org.apache.spark.util.ArrayImplicits._
 import org.apache.spark.util.Utils
 
 /**
- * As a workaround for https://issues.scala-lang.org/browse/SI-8905, implementations
- * of JavaRDDLike should extend this dummy abstract class instead of directly inheriting
- * from the trait. See SPARK-3266 for additional details.
+ * AbstractJavaRDDLike - 抽象基类，用于绕过 Scala 编译器 bug
+ * 
+ * 作为 SI-8905 问题的临时解决方案，JavaRDDLike 的实现应继承此抽象类
+ * 而非直接继承 trait。详见 SPARK-3266。
  */
 private[spark] abstract class AbstractJavaRDDLike[T, This <: JavaRDDLike[T, This]]
   extends JavaRDDLike[T, This]
 
 /**
- * Defines operations common to several Java RDD implementations.
+ * JavaRDDLike - 定义多个 Java RDD 实现的通用操作
+ * 
+ * 这是一个 trait，为 JavaRDD、JavaPairRDD、JavaDoubleRDD 等提供统一的操作接口。
+ * 包含的核心功能：
+ * 
+ * 1. 转换操作：map、flatMap、filter、mapPartitions 等
+ * 2. 行动操作：collect、count、reduce、take、foreach 等
+ * 3. 分区操作：partitions、getNumPartitions、partitioner
+ * 4. 高级操作：zip、pipe、cartesian、groupBy
+ * 5. 异步操作：countAsync、collectAsync、foreachAsync 等
+ * 
+ * 设计要点：
+ * - 使用 self-type pattern (This) 确保方法返回正确的子类型
+ * - 所有操作自动处理 Java/Scala 集合类型转换
+ * - 提供函数式 API（使用 Java Function 接口）
  *
- * @note This trait is not intended to be implemented by user code.
+ * @note 此 trait 不应由用户代码直接实现，仅供 Spark 内部使用。
  */
 trait JavaRDDLike[T, This <: JavaRDDLike[T, This]] extends Serializable {
   def wrapRDD(rdd: RDD[T]): This

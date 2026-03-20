@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -16,6 +17,8 @@
  */
 
 /**
- * Pluggable serializers for RDD and shuffle data.
+ * 可插拔的序列化器，用于 RDD 和 shuffle 数据的序列化
+ * 
+ * 提供多种序列化实现：JavaSerializer、KryoSerializer 等
  */
 package org.apache.spark.serializer;

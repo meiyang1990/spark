@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -60,12 +61,11 @@ class DefaultTopologyMapper(conf: SparkConf) extends TopologyMapper(conf) with L
 }
 
 /**
- * A simple file based topology mapper. This expects topology information provided as a
- * `java.util.Properties` file. The name of the file is obtained from SparkConf property
- * `spark.storage.replication.topologyFile`. To use this topology mapper, set the
- * `spark.storage.replication.topologyMapper` property to
+ * 基于文件的拓扑映射器。期望拓扑信息以 `java.util.Properties` 文件提供。
+ * 文件名通过 SparkConf 属性 `spark.storage.replication.topologyFile` 获取。
+ * 要使用此拓扑映射器，需设置 `spark.storage.replication.topologyMapper` 为
  * [[org.apache.spark.storage.FileBasedTopologyMapper]]
- * @param conf SparkConf object
+ * @param conf SparkConf 对象
  */
 @DeveloperApi
 class FileBasedTopologyMapper(conf: SparkConf) extends TopologyMapper(conf) with Logging {

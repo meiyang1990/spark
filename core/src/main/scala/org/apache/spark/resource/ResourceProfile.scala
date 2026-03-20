@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -34,16 +35,25 @@ import org.apache.spark.internal.config.Python.PYSPARK_EXECUTOR_MEMORY
 import org.apache.spark.util.Utils
 
 /**
- * Resource profile to associate with an RDD. A ResourceProfile allows the user to
- * specify executor and task requirements for an RDD that will get applied during a
- * stage. This allows the user to change the resource requirements between stages.
- * This is meant to be immutable so user can't change it after building. Users
- * should use [[ResourceProfileBuilder]] to build it.
- *
- * @param executorResources Resource requests for executors. Mapped from the resource
- *                          name (e.g., cores, memory, CPU) to its specific request.
- * @param taskResources Resource requests for tasks. Mapped from the resource
- *                      name (e.g., cores, memory, CPU) to its specific request.
+ * ResourceProfile - 与 RDD 关联的资源配置
+ * 
+ * 允许用户为 RDD 指定 Executor 和 Task 的资源需求，这些需求将在 Stage 级别应用。
+ * 使得用户可以在不同 Stage 间更改资源需求。
+ * 
+ * 核心功能：
+ * 1. 定义 Executor 资源（cores、memory、offHeap、GPU 等）
+ * 2. 定义 Task 资源（cpus、GPU 等，支持分数资源）
+ * 3. 计算每个 Executor 最多可运行的任务数（基于限制资源）
+ * 4. 验证资源配置的合理性
+ * 
+ * 设计要点：
+ * - 对象不可变，用户应通过 ResourceProfileBuilder 构建
+ * - 支持分数资源（如 task.gpu.amount=0.5 表示 2 个任务共享 1 个 GPU）
+ * - 自动计算限制资源（最少 slot 的资源）和每个 Executor 的最大任务数
+ * - 每个 ResourceProfile 有唯一的 ID
+ * 
+ * @param executorResources Executor 资源请求（资源名 -> ExecutorResourceRequest）
+ * @param taskResources Task 资源请求（资源名 -> TaskResourceRequest）
  */
 @Evolving
 @Since("3.1.0")
@@ -285,15 +295,16 @@ class ResourceProfile(
 }
 
 /**
- * Resource profile which only contains task resources, can be used for stage level task schedule
- * when dynamic allocation is disabled, tasks will be scheduled to executors with default resource
- * profile based on task resources described by this task resource profile.
- * And when dynamic allocation is enabled, will require new executors for this profile based on
- * the default executor resources requested at startup and assign tasks only on executors created
- * with this resource profile.
- *
- * @param taskResources Resource requests for tasks. Mapped from the resource
- *                      name (e.g., cores, memory, CPU) to its specific request.
+ * TaskResourceProfile - 仅包含任务资源的资源配置
+ * 
+ * 用于 Stage 级别的任务调度，不需要指定 Executor 资源。
+ * 
+ * 使用场景：
+ * 1. 动态分配禁用时：任务将被调度到使用默认资源配置的 Executor 上
+ * 2. 动态分配启用时：基于启动时的默认 Executor 资源请求新的 Executor，
+ *    并仅在使用此配置创建的 Executor 上分配任务
+ * 
+ * @param taskResources Task 资源请求（资源名 -> TaskResourceRequest）
  */
 @Evolving
 @Since("3.4.0")

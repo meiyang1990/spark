@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -42,7 +43,7 @@ class BlockManagerStorageEndpoint(
   private implicit val asyncExecutionContext: ExecutionContextExecutorService =
     ExecutionContext.fromExecutorService(asyncThreadPool)
 
-  // Operations that involve removing blocks may be slow and should be done asynchronously
+  // 涉及删除 block 的操作可能很慢，应该异步执行
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
     case RemoveBlock(blockId) =>
       doAsync[Boolean](log"removing block ${MDC(BLOCK_ID, blockId)}", context) {

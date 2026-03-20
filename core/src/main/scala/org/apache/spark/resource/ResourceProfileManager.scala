@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,10 +32,25 @@ import org.apache.spark.util.Utils
 import org.apache.spark.util.Utils.isTesting
 
 /**
- * Manager of resource profiles. The manager allows one place to keep the actual ResourceProfiles
- * and everywhere else we can use the ResourceProfile Id to save on space.
- * Note we never remove a resource profile at this point. Its expected this number is small
- * so this shouldn't be much overhead.
+ * ResourceProfileManager - 资源配置管理器
+ * 
+ * 管理所有 ResourceProfile 的中心位置，其他地方可以只使用 ResourceProfile ID 以节省空间。
+ * 
+ * 核心功能：
+ * 1. 注册和存储所有 ResourceProfile（通过 ID 索引）
+ * 2. 验证 ResourceProfile 是否被当前集群管理器支持
+ * 3. 判断任务是否可以调度到特定 Executor（基于 ResourceProfile 匹配）
+ * 4. 查找等价的 ResourceProfile（避免重复创建）
+ * 
+ * 支持的集群管理器：
+ * - YARN、Kubernetes、Standalone（需启用动态分配）
+ * - TaskResourceProfile 在动态分配禁用时也支持 Standalone
+ * 
+ * 调度规则：
+ * 1. 动态分配禁用时：TaskResourceProfile 的任务可以调度到默认 Executor
+ * 2. 其他情况：任务和 Executor 的 ResourceProfile 必须完全匹配
+ * 
+ * @note 目前不会移除 ResourceProfile，预期数量较少，开销不大
  */
 @Evolving
 private[spark] class ResourceProfileManager(sparkConf: SparkConf,

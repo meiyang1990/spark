@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -17,6 +18,7 @@
 
 package org.apache.spark.storage
 
+// Block 相关的异常，携带块 ID 和错误消息
 private[spark]
 case class BlockException(blockId: BlockId, message: String) extends Exception(message)
 

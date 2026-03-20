@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,6 +32,28 @@ import org.apache.spark.resource.ResourceProfile
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.Utils
 
+/**
+ * JavaRDD - Java API 的基础 RDD 类
+ * 
+ * 封装 Scala 的 RDD[T]，为 Java 提供类型安全的分布式数据集操作接口。
+ * 支持的核心操作包括：
+ * 
+ * 1. 转换操作：map、flatMap、filter、distinct、sample
+ * 2. 缓存与持久化：cache、persist、unpersist
+ * 3. 分区操作：coalesce、repartition
+ * 4. 资源管理：withResources（指定 ResourceProfile）
+ * 
+ * 设计要点：
+ * - 继承 AbstractJavaRDDLike 获得通用 RDD 操作
+ * - 所有返回值都是 Java 友好类型（JList、JIterator 等）
+ * - 自动处理 ClassTag 传递（Java 无法自动推导）
+ * 
+ * 与 Scala RDD 的主要区别：
+ * - 使用 Java Function 接口而非 Scala 函数
+ * - 返回 Java 集合类型而非 Scala 集合
+ * 
+ * @param T 元素类型
+ */
 class JavaRDD[T](val rdd: RDD[T])(implicit val classTag: ClassTag[T])
   extends AbstractJavaRDDLike[T, JavaRDD[T]] {
 

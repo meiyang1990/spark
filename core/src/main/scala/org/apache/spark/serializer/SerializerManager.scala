@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -121,21 +122,21 @@ private[spark] class SerializerManager(
   }
 
   /**
-   * Wrap an input stream for encryption and compression
+   * 包装输入流：先加密再压缩
    */
   def wrapStream(blockId: BlockId, s: InputStream): InputStream = {
     wrapForCompression(blockId, wrapForEncryption(s))
   }
 
   /**
-   * Wrap an output stream for encryption and compression
+   * 包装输出流：先加密再压缩
    */
   def wrapStream(blockId: BlockId, s: OutputStream): OutputStream = {
     wrapForCompression(blockId, wrapForEncryption(s))
   }
 
   /**
-   * Wrap an input stream for encryption if shuffle encryption is enabled
+   * 如果启用了加密，则包装输入流进行解密
    */
   def wrapForEncryption(s: InputStream): InputStream = {
     encryptionKey
@@ -144,7 +145,7 @@ private[spark] class SerializerManager(
   }
 
   /**
-   * Wrap an output stream for encryption if shuffle encryption is enabled
+   * 如果启用了加密，则包装输出流进行加密
    */
   def wrapForEncryption(s: OutputStream): OutputStream = {
     encryptionKey
@@ -153,20 +154,24 @@ private[spark] class SerializerManager(
   }
 
   /**
-   * Wrap an output stream for compression if block compression is enabled for its block type
+   * 如果该 Block 类型需要压缩，则包装输出流
    */
   def wrapForCompression(blockId: BlockId, s: OutputStream): OutputStream = {
     if (shouldCompress(blockId)) compressionCodec.compressedOutputStream(s) else s
   }
 
   /**
-   * Wrap an input stream for compression if block compression is enabled for its block type
+   * 如果该 Block 类型需要压缩，则包装输入流
    */
   def wrapForCompression(blockId: BlockId, s: InputStream): InputStream = {
     if (shouldCompress(blockId)) compressionCodec.compressedInputStream(s) else s
   }
 
-  /** Serializes into a stream. */
+  /** 
+   * 将数据序列化到输出流
+   * 
+   * 自动选择合适的序列化器并应用压缩
+   */
   def dataSerializeStream[T: ClassTag](
       blockId: BlockId,
       outputStream: OutputStream,
@@ -176,20 +181,29 @@ private[spark] class SerializerManager(
       .writeAll(values).close()
   }
 
-  /** Serializes into a chunked byte buffer. */
+  /** 
+   * 将数据序列化到 ChunkedByteBuffer
+   * 
+   * 用于需要在内存中保存序列化数据的场景
+   */
   def dataSerialize[T: ClassTag](
       blockId: BlockId,
       values: Iterator[T]): ChunkedByteBuffer = {
     dataSerializeWithExplicitClassTag(blockId, values, implicitly[ClassTag[T]])
   }
 
-  /** Serializes into a chunked byte buffer. */
+  /** 
+   * 将数据序列化到 ChunkedByteBuffer（显式 ClassTag）
+   * 
+   * 使用分块缓冲区（默认 4MB 块）避免单个 ByteBuffer 大小限制
+   */
   def dataSerializeWithExplicitClassTag(
       blockId: BlockId,
       values: Iterator[_],
       classTag: ClassTag[_]): ChunkedByteBuffer = {
     val bbos = new ChunkedByteBufferOutputStream(1024 * 1024 * 4, ByteBuffer.allocate)
     val byteStream = new BufferedOutputStream(bbos)
+    // StreamBlockId 不自动选择 Kryo（避免影响 Streaming）
     val autoPick = !blockId.isInstanceOf[StreamBlockId]
     val ser = getSerializer(classTag, autoPick).newInstance()
     ser.serializeStream(wrapForCompression(blockId, byteStream)).writeAll(values).close()
@@ -197,8 +211,9 @@ private[spark] class SerializerManager(
   }
 
   /**
-   * Deserializes an InputStream into an iterator of values and disposes of it when the end of
-   * the iterator is reached.
+   * 从输入流反序列化数据为迭代器
+   * 
+   * 迭代器读取完毕后会自动关闭输入流
    */
   def dataDeserializeStream[T](
       blockId: BlockId,
@@ -212,7 +227,11 @@ private[spark] class SerializerManager(
       .asIterator.asInstanceOf[Iterator[T]]
   }
 
-  /** Generate a `SerializationStream` for a block. */
+  /** 
+   * 为 Block 创建序列化流
+   * 
+   * 内部使用，自动选择序列化器并应用压缩
+   */
   private[spark] def blockSerializationStream[T](
       blockId: BlockId,
       outputStream: OutputStream)

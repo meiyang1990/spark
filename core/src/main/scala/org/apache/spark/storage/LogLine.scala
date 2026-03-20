@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -21,11 +22,11 @@ import scala.reflect.ClassTag
 import scala.reflect.classTag
 
 /**
- * Base class representing a log line.
+ * 日志行的基类
  *
- * @param eventTime timestamp in milliseconds when the log is written
- * @param sequenceId sequence ID of the log line
- * @param message log message
+ * @param eventTime 日志写入时的时间戳（毫秒）
+ * @param sequenceId 日志行的序列 ID
+ * @param message 日志消息内容
  */
 trait LogLine {
   val eventTime: Long
@@ -34,6 +35,7 @@ trait LogLine {
 }
 
 object LogLine {
+  // 根据日志块类型获取对应的 ClassTag
   def getClassTag(logBlockType: LogBlockType.LogBlockType): ClassTag[_<:LogLine] =
     logBlockType match {
       case LogBlockType.TEST =>
@@ -45,9 +47,11 @@ object LogLine {
     }
 }
 
+// 测试日志行
 case class TestLogLine(eventTime: Long, sequenceId: Long, message: String)
   extends LogLine {
 }
 
+// Python Worker 日志行
 case class PythonWorkerLogLine(eventTime: Long, sequenceId: Long, message: String)
   extends LogLine

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -21,21 +22,21 @@ import org.apache.spark.SparkException
 import org.apache.spark.storage.LogBlockType.LogBlockType
 
 /**
- * LogBlockIdGenerator is responsible for generating unique LogBlockIds for log blocks.
+ * LogBlockIdGenerator 负责为日志块生成唯一的 LogBlockId
  */
 trait LogBlockIdGenerator {
-  // The log block type that this generator supports.
+  // 该生成器支持的日志块类型
   def logBlockType: LogBlockType
 
-  // Generates a unique LogBlockId based on the last log time and executor ID.
+  // 基于最后日志时间和 executor ID 生成唯一的 LogBlockId
   protected def genUniqueBlockId(lastLogTime: Long, executorId: String): LogBlockId
 
   /**
-   * Generates a new LogBlockId based on the last log time and executor ID. Make sure that
-   * the generated LogBlockId has the same log block type as this generator.
+   * 基于最后日志时间和 executor ID 生成新的 LogBlockId。
+   * 确保生成的 LogBlockId 的日志块类型与该生成器的类型一致。
    *
-   * @param lastLogTime The timestamp of the last log entry.
-   * @param executorId The ID of the executor generating the log block.
+   * @param lastLogTime 最后日志条目的时间戳
+   * @param executorId 生成日志块的 executor ID
    */
   final def nextBlockId(lastLogTime: Long, executorId: String): LogBlockId = {
     val blockId = genUniqueBlockId(lastLogTime, executorId)
@@ -48,6 +49,7 @@ trait LogBlockIdGenerator {
   }
 }
 
+// Python Worker 日志块 ID 生成器
 class PythonWorkerLogBlockIdGenerator(
     sessionId: String,
     workerId: String)

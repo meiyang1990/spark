@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -22,7 +23,7 @@ import org.apache.spark.storage.BlockManagerMessages.UpdateBlockInfo
 
 /**
  * :: DeveloperApi ::
- * Stores information about a block status in a block manager.
+ * 存储 BlockManager 中 Block 状态的信息。
  */
 @DeveloperApi
 case class BlockUpdatedInfo(
@@ -34,6 +35,7 @@ case class BlockUpdatedInfo(
 
 private[spark] object BlockUpdatedInfo {
 
+  // 从 UpdateBlockInfo 消息构造 BlockUpdatedInfo
   private[spark] def apply(updateBlockInfo: UpdateBlockInfo): BlockUpdatedInfo = {
     BlockUpdatedInfo(
       updateBlockInfo.blockManagerId,

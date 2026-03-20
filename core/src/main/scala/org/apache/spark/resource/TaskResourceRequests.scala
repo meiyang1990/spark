@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -26,9 +27,17 @@ import org.apache.spark.annotation.{Evolving, Since}
 import org.apache.spark.resource.ResourceProfile._
 
 /**
- * A set of task resource requests. This is used in conjunction with the ResourceProfile to
- * programmatically specify the resources needed for an RDD that will be applied at the
- * stage level.
+ * TaskResourceRequests - 任务资源请求集合
+ * 
+ * 与 ResourceProfile 配合使用，以编程方式指定 RDD 在 Stage 级别所需的 Task 资源。
+ * 
+ * 提供便捷的 API 来配置 Task 的各种资源：
+ * 1. CPU：cpus（每个任务的 CPU 核心数）
+ * 2. 自定义资源：resource（GPU、FPGA 等，支持分数资源）
+ * 
+ * 分数资源说明：
+ * - amount <= 0.5 或整数
+ * - 分数表示多个任务共享资源，如 0.5 = 2 个任务共享 1 个资源地址
  */
 @Evolving
 @Since("3.1.0")

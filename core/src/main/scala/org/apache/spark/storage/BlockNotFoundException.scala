@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -17,4 +18,5 @@
 
 package org.apache.spark.storage
 
+// Block 未找到异常
 class BlockNotFoundException(blockId: String) extends Exception(s"Block $blockId not found")

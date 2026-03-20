@@ -109,6 +109,7 @@ private[spark] class LogBlockWriter(
     }
   }
 
+  // 保存日志块到 BlockManager
   def save(blockId: LogBlockId): Unit = {
     if (hasBeenClosed) {
       throw SparkException.internalError(
@@ -129,7 +130,7 @@ private[spark] class LogBlockWriter(
 
       if(recordsWritten) {
         totalBytesWritten = cos.getCount
-        // Save log block to BlockManager and delete the tmpFile.
+        // 保存日志块到 BlockManager 并删除临时文件
         val success = saveToBlockManager(blockId, totalBytesWritten)
         if (!success) {
           throw SparkException.internalError(s"Failed to save log block $blockId to BlockManager")

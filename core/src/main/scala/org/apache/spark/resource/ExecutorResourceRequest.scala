@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -20,34 +21,32 @@ package org.apache.spark.resource
 import org.apache.spark.annotation.{Evolving, Since}
 
 /**
- * An Executor resource request. This is used in conjunction with the [[ResourceProfile]] to
- * programmatically specify the resources needed for an RDD that will be applied at the
- * stage level.
+ * ExecutorResourceRequest - Executor 资源请求
+ * 
+ * 与 ResourceProfile 配合使用，以编程方式指定 RDD 在 Stage 级别所需的 Executor 资源。
+ * 
+ * 主要功能：
+ * 1. 指定 Executor 的资源需求（GPU、FPGA 等）
+ * 2. 定义如何发现这些资源的具体信息
+ * 
+ * 参数说明：
+ * - amount：资源数量（如每个 Executor 需要多少个 GPU）
+ * - discoveryScript：可选的资源发现脚本。某些集群管理器（如 YARN）不会告诉 Spark
+ *   分配的资源地址，需要在 Executor 启动时运行脚本来发现可用资源地址
+ * - vendor：可选的供应商信息，某些集群管理器（如 Kubernetes）需要此参数
+ * 
+ * 使用示例（YARN 上分配 GPU）：
+ * - resourceName: "gpu"
+ * - amount: 每个 Executor 需要的 GPU 数量
+ * - discoveryScript: 发现 GPU 地址的脚本（YARN 不会主动告知）
+ * - vendor: 留空（仅 Kubernetes 需要）
+ * 
+ * 建议使用 ExecutorResourceRequests 类作为便捷 API。
  *
- * This is used to specify what the resource requirements are for an Executor and how
- * Spark can find out specific details about those resources. Not all the parameters are
- * required for every resource type. Resources like GPUs are supported and have same limitations
- * as using the global spark configs spark.executor.resource.gpu.*. The amount, discoveryScript,
- * and vendor parameters for resources are all the same parameters a user would specify through the
- * configs: spark.executor.resource.{resourceName}.{amount, discoveryScript, vendor}.
- *
- * For instance, a user wants to allocate an Executor with GPU resources on YARN. The user has
- * to specify the resource name (gpu), the amount or number of GPUs per Executor,
- * the discovery script would be specified so that when the Executor starts up it can
- * discovery what GPU addresses are available for it to use because YARN doesn't tell
- * Spark that, then vendor would not be used because its specific for Kubernetes.
- *
- * See the configuration and cluster specific docs for more details.
- *
- * Use [[ExecutorResourceRequests]] class as a convenience API.
- *
- * @param resourceName Name of the resource
- * @param amount Amount requesting
- * @param discoveryScript Optional script used to discover the resources. This is required on some
- *                        cluster managers that don't tell Spark the addresses of the resources
- *                        allocated. The script runs on Executors startup to discover the addresses
- *                        of the resources available.
- * @param vendor Optional vendor, required for some cluster managers
+ * @param resourceName 资源名称
+ * @param amount 请求的数量
+ * @param discoveryScript 可选的资源发现脚本
+ * @param vendor 可选的供应商名称
  */
 @Evolving
 @Since("3.1.0")

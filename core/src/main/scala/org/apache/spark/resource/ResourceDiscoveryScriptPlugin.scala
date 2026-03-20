@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -28,11 +29,19 @@ import org.apache.spark.internal.LogKeys
 import org.apache.spark.util.Utils.executeAndGetOutput
 
 /**
- * The default plugin that is loaded into a Spark application to control how custom
- * resources are discovered. This executes the discovery script specified by the user
- * and gets the json output back and constructs ResourceInformation objects from that.
- * If the user specifies custom plugins, this is the last one to be executed and
- * throws if the resource isn't discovered.
+ * ResourceDiscoveryScriptPlugin - 默认的资源发现插件
+ * 
+ * Spark 应用中加载的默认插件，用于控制如何发现自定义资源（如 GPU、FPGA）。
+ * 
+ * 工作流程：
+ * 1. 执行用户指定的发现脚本
+ * 2. 获取脚本的 JSON 输出
+ * 3. 将 JSON 解析为 ResourceInformation 对象
+ * 
+ * 设计要点：
+ * - 如果用户指定了自定义插件，此插件会作为最后一个执行
+ * - 如果资源未被发现，则抛出异常
+ * - 验证脚本返回的资源名称与请求的资源名称一致
  *
  * @since 3.0.0
  */

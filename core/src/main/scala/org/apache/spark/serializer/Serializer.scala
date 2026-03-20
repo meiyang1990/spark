@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -146,21 +147,32 @@ abstract class SerializationStream extends Closeable {
 
 /**
  * :: DeveloperApi ::
- * A stream for reading serialized objects.
+ * DeserializationStream - 反序列化输入流
+ * 
+ * 提供流式读取序列化对象的接口。
+ * 
+ * 主要方法：
+ * - readObject：通用对象读取
+ * - readKey/readValue：键值对的读取（用于 PairRDD）
+ * - asIterator：转换为对象迭代器
+ * - asKeyValueIterator：转换为键值对迭代器
  */
 @DeveloperApi
 abstract class DeserializationStream extends Closeable {
-  /** The most general-purpose method to read an object. */
+  /** 读取对象的通用方法 */
   def readObject[T: ClassTag](): T
-  /** Reads the object representing the key of a key-value pair. */
+  /** 读取键值对的键 */
   def readKey[T: ClassTag](): T = readObject[T]()
-  /** Reads the object representing the value of a key-value pair. */
+  /** 读取键值对的值 */
   def readValue[T: ClassTag](): T = readObject[T]()
+  /** 关闭输入流 */
   override def close(): Unit
 
   /**
-   * Read the elements of this stream through an iterator. This can only be called once, as
-   * reading each element will consume data from the input source.
+   * 将流转换为对象迭代器
+   * 
+   * 注意：只能调用一次，因为读取每个元素会消耗输入源的数据
+   * 到达流末尾时会捕获 EOFException 并结束迭代
    */
   def asIterator: Iterator[Any] = new NextIterator[Any] {
     override protected def getNext() = {
@@ -179,8 +191,10 @@ abstract class DeserializationStream extends Closeable {
   }
 
   /**
-   * Read the elements of this stream through an iterator over key-value pairs. This can only be
-   * called once, as reading each element will consume data from the input source.
+   * 将流转换为键值对迭代器
+   * 
+   * 注意：只能调用一次，因为读取每个元素会消耗输入源的数据
+   * 到达流末尾时会捕获 EOFException 并结束迭代
    */
   def asKeyValueIterator: Iterator[(Any, Any)] = new NextIterator[(Any, Any)] {
     override protected def getNext() = {

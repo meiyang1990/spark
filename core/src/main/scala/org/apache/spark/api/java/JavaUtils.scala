@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -22,7 +23,13 @@ import java.util.Map.Entry
 
 import scala.collection.mutable
 
+/**
+ * JavaUtils - Java API 内部工具类
+ * 
+ * 提供 Scala/Java 集合类型转换等辅助方法，专为 Java API 层使用。
+ */
 private[spark] object JavaUtils {
+  // 将 Scala Option 转换为 Java Optional
   def optionToOptional[T](option: Option[T]): Optional[T] =
     if (option.isDefined) {
       Optional.of(option.get)
@@ -30,10 +37,17 @@ private[spark] object JavaUtils {
       Optional.empty[T]
     }
 
+  // 将 Scala Map 包装为可序列化的 Java Map（解决 SPARK-3926 / SI-8911）
   // Workaround for SPARK-3926 / SI-8911
   def mapAsSerializableJavaMap[A, B](underlying: collection.Map[A, B]): SerializableMapWrapper[A, B]
     = new SerializableMapWrapper(underlying)
 
+  /**
+   * SerializableMapWrapper - 可序列化的 Map 包装器
+   * 
+   * 从 scala.collection.convert.Wrappers.MapWrapper 复制实现并添加 Serializable 支持。
+   * 原 MapWrapper 没有无参构造器，无法直接子类化，因此独立实现。
+   */
   // Implementation is copied from scala.collection.convert.Wrappers.MapWrapper,
   // but implements java.io.Serializable. It can't just be subclassed to make it
   // Serializable since the MapWrapper class has no no-arg constructor. This class
@@ -43,6 +57,7 @@ private[spark] object JavaUtils {
 
     override def size: Int = underlying.size
 
+    // 委托给底层实现以避免 AbstractMap 遍历整个 key set
     // Delegate to implementation because AbstractMap implementation iterates over whole key set
     override def containsKey(key: AnyRef): Boolean = try {
       underlying.contains(key.asInstanceOf[A])

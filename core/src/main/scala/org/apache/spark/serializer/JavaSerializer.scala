@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -110,6 +111,14 @@ private object JavaDeserializationStream {
 
 }
 
+/**
+ * JavaSerializerInstance - Java 序列化器实例
+ * 
+ * 提供序列化/反序列化的具体实现，支持：
+ * - 单个对象的序列化/反序列化（ByteBuffer 形式）
+ * - 流式序列化/反序列化（InputStream/OutputStream 形式）
+ * - 自定义类加载器
+ */
 private[spark] class JavaSerializerInstance(
     counterReset: Int,
     extraDebugInfo: Boolean,

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -21,11 +22,16 @@ import com.codahale.metrics.{Gauge, MetricRegistry}
 
 import org.apache.spark.metrics.source.Source
 
+/**
+ * BlockManager 的指标数据源，暴露内存和磁盘使用情况的 Gauge 指标。
+ * 包括堆内/堆外内存的最大值、剩余值、已用值，以及磁盘空间使用情况。
+ */
 private[spark] class BlockManagerSource(val blockManager: BlockManager)
     extends Source {
   override val metricRegistry = new MetricRegistry()
   override val sourceName = "BlockManager"
 
+  // 注册 Gauge 指标，单位转换为 MB
   private def registerGauge(name: String, func: BlockManagerMaster => Long): Unit = {
     metricRegistry.register(name, new Gauge[Long] {
       override def getValue: Long = func(blockManager.master) / 1024 / 1024

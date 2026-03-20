@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,13 +28,17 @@ import org.apache.spark.annotation.Evolving
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * Class to hold information about a type of Resource. A resource could be a GPU, FPGA, etc.
- * The array of addresses are resource specific and its up to the user to interpret the address.
+ * ResourceInformation - 资源信息类
+ * 
+ * 保存某种类型资源的信息。资源可以是 GPU、FPGA 等。
+ * 
+ * 地址数组是资源特定的，由用户解释其含义。
+ * 例如对于 GPU，addresses 可能是 GPU 的索引号（如 ["0", "1"]）。
+ * 
+ * 提供 JSON 序列化/反序列化支持，用于在 Spark 组件间传递资源信息。
  *
- * One example is GPUs, where the addresses would be the indices of the GPUs
- *
- * @param name the name of the resource
- * @param addresses an array of strings describing the addresses of the resource
+ * @param name 资源名称
+ * @param addresses 描述资源地址的字符串数组
  *
  * @since 3.0.0
  */
@@ -92,7 +97,11 @@ private[spark] object ResourceInformation {
   }
 }
 
-/** A case class to simplify JSON serialization of [[ResourceInformation]]. */
+/** 
+ * ResourceInformationJson - 简化 ResourceInformation 的 JSON 序列化
+ * 
+ * 用于在发现脚本和 Spark 之间传递资源信息。
+ */
 private case class ResourceInformationJson(name: String, addresses: Seq[String]) {
 
   def toJValue: JValue = {

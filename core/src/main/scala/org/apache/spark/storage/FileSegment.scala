@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -20,8 +21,7 @@ package org.apache.spark.storage
 import java.io.File
 
 /**
- * References a particular segment of a file (potentially the entire file),
- * based off an offset and a length.
+ * 引用文件的特定段（可能是整个文件），基于偏移量和长度。
  */
 private[spark] class FileSegment(val file: File, val offset: Long, val length: Long) {
   require(offset >= 0, s"File segment offset cannot be negative (got $offset)")

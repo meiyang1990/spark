@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -24,15 +25,12 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.apache.spark.network.buffer.ManagedBuffer
 
 /**
- * This [[ManagedBuffer]] wraps a [[BlockData]] instance retrieved from the [[BlockManager]]
- * so that the corresponding block's read lock can be released once this buffer's references
- * are released.
+ * 这个 [[ManagedBuffer]] 包装了从 [[BlockManager]] 检索的 [[BlockData]] 实例，
+ * 以便在该 buffer 的引用释放后，相应 block 的读锁也能被释放。
  *
- * If `dispose` is set to true, the [[BlockData]]will be disposed when the buffer's reference
- * count drops to zero.
+ * 如果 `dispose` 设置为 true，当 buffer 的引用计数降为零时，[[BlockData]] 会被销毁。
  *
- * This is effectively a wrapper / bridge to connect the BlockManager's notion of read locks
- * to the network layer's notion of retain / release counts.
+ * 这实际上是一个包装器/桥接器，用于连接 BlockManager 的读锁概念和网络层的 retain/release 计数概念。
  */
 private[storage] class BlockManagerManagedBuffer(
     blockInfoManager: BlockInfoManager,

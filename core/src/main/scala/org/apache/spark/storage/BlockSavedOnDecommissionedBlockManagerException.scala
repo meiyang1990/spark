@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -17,5 +18,6 @@
 
 package org.apache.spark.storage
 
+// 尝试在已退役的 BlockManager 上保存 Block 时抛出的异常
 private[spark] class BlockSavedOnDecommissionedBlockManagerException(blockId: BlockId)
   extends Exception(s"Block $blockId cannot be saved on decommissioned executor")

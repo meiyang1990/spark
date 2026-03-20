@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -32,6 +33,12 @@ import org.apache.spark.{SparkContext, SparkJobInfo, SparkStageInfo}
  * `spark.ui.retainedJobs` jobs.
  *
  * @note This class's constructor should be considered private and may be subject to change.
+ * 
+ * JavaSparkStatusTracker - Job/Stage 状态跟踪的 Java API
+ * 
+ * 提供低级别的 Job 和 Stage 进度监控 API。
+ * 这些 API 有意提供弱一致性语义，调用者应准备好处理空值或缺失信息。
+ * 仅保留最近的作业和阶段信息（由 spark.ui.retainedJobs/retainedStages 控制）。
  */
 class JavaSparkStatusTracker private[spark] (sc: SparkContext) {
 

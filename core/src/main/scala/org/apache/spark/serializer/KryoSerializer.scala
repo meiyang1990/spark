@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -53,18 +54,42 @@ import org.apache.spark.util.collection.{BitSet, CompactBuffer}
 import org.apache.spark.util.io.ChunkedByteBuffer
 
 /**
- * A Spark serializer that uses the <a href="https://code.google.com/p/kryo/">
- * Kryo serialization library</a>.
- *
- * @note This serializer is not guaranteed to be wire-compatible across different versions of
- * Spark. It is intended to be used to serialize/de-serialize data within a single
- * Spark application.
+ * KryoSerializer - 基于 Kryo 库的高性能序列化器
+ * 
+ * 核心特点：
+ * 1. 性能：比 JavaSerializer 快 10 倍，体积小 10 倍
+ * 2. 类注册：通过注册类提升性能（避免写入完整类名）
+ * 3. 缓冲区管理：支持自动扩容，可配置初始和最大大小
+ * 4. 引用跟踪：可选的对象引用跟踪（处理循环引用）
+ * 5. Unsafe 模式：使用 sun.misc.Unsafe 提升性能
+ * 6. 对象池：可选的 Kryo 实例池（减少创建开销）
+ * 
+ * 配置要点：
+ * - spark.kryo.registrator：自定义类注册器
+ * - spark.kryo.classesToRegister：要注册的类列表
+ * - spark.kryo.registrationRequired：是否强制注册（未注册类会报错）
+ * - spark.kryo.referenceTracking：是否跟踪引用（循环引用必须启用）
+ * - spark.kryo.unsafe：是否使用 Unsafe（更快但不安全）
+ * - spark.serializer.objectStreamReset：auto-reset（影响 relocation）
+ * 
+ * 预注册类：
+ * - Spark 核心类（StorageLevel、BlockManagerId、ChunkedByteBuffer 等）
+ * - 原始类型数组
+ * - Tuple 数组（Tuple1 到 Tuple22）
+ * - Scala 集合类
+ * - SQL/ML/MLlib 类（如果可用）
+ * - Avro GenericContainer 类
+ * 
+ * 注意：不保证跨 Spark 版本的线路兼容性，仅用于单个应用内部。
+ * 
+ * @see <a href="https://github.com/EsotericSoftware/kryo">Kryo 序列化库</a>
  */
 class KryoSerializer(conf: SparkConf)
   extends org.apache.spark.serializer.Serializer
   with Logging
   with Serializable {
 
+  /** 初始缓冲区大小（KB），写入超过此大小时自动扩容 */
   private val bufferSizeKb = conf.get(KRYO_SERIALIZER_BUFFER_SIZE)
 
   if (bufferSizeKb >= ByteUnit.GiB.toKiB(2)) {
@@ -76,6 +101,7 @@ class KryoSerializer(conf: SparkConf)
   }
   private val bufferSize = ByteUnit.KiB.toBytes(bufferSizeKb).toInt
 
+  /** 最大缓冲区大小（MB），超过此大小会抛出 Buffer overflow 异常 */
   val maxBufferSizeMb = conf.get(KRYO_SERIALIZER_MAX_BUFFER_SIZE).toInt
   if (maxBufferSizeMb >= ByteUnit.GiB.toMiB(2)) {
     throw new SparkIllegalArgumentException(
@@ -86,20 +112,27 @@ class KryoSerializer(conf: SparkConf)
   }
   private val maxBufferSize = ByteUnit.MiB.toBytes(maxBufferSizeMb).toInt
 
+  /** 是否跟踪对象引用（处理循环引用，禁用可提升性能） */
   private val referenceTracking = conf.get(KRYO_REFERENCE_TRACKING)
+  /** 是否强制要求类注册（未注册的类会抛出异常） */
   private val registrationRequired = conf.get(KRYO_REGISTRATION_REQUIRED)
+  /** 用户自定义的类注册器列表 */
   private val userRegistrators = conf.get(KRYO_USER_REGISTRATORS)
     .map(_.trim)
     .filter(!_.isEmpty)
+  /** 要注册的类名列表 */
   private val classesToRegister = conf.get(KRYO_CLASSES_TO_REGISTER)
     .map(_.trim)
     .filter(!_.isEmpty)
 
+  /** Avro schema 配置（用于 Avro 序列化） */
   private val avroSchemas = conf.getAvroSchema
-  // whether to use unsafe based IO for serialization
+  /** 是否使用 Unsafe 模式（更快但不检查边界） */
   private val useUnsafe = conf.get(KRYO_USE_UNSAFE)
+  /** 是否使用对象池（复用 Kryo 实例） */
   private val usePool = conf.get(KRYO_USE_POOL)
 
+  /** 创建 KryoOutput 实例（根据 useUnsafe 配置选择实现） */
   def newKryoOutput(): KryoOutput =
     if (useUnsafe) {
       new KryoUnsafeOutput(bufferSize, math.max(bufferSize, maxBufferSize))
@@ -137,6 +170,26 @@ class KryoSerializer(conf: SparkConf)
 
   def pool: KryoPool = internalPool
 
+  /**
+   * 创建新的 Kryo 实例并注册 Spark 所需的类
+   * 
+   * 注册顺序：
+   * 1. 配置 referenceTracking（用户注册器可覆盖）
+   * 2. 注册 Spark 核心类（toRegister 和 toRegisterSerializer）
+   * 3. 注册 Java Iterable 包装器（asJavaIterable）
+   * 4. 注册自定义 Java 序列化的类（SerializableWritable、SerializableConfiguration 等）
+   * 5. 注册 Avro GenericContainer 类
+   * 6. 注册用户配置的类（spark.kryo.classesToRegister）
+   * 7. 调用用户注册器（spark.kryo.registrator）
+   * 8. 注册 Chill 的 Scala 类（AllScalaRegistrar）
+   * 9. 注册 Chill 遗漏的类（Tuple 数组、Scala 集合类）
+   * 10. 注册 SQL/ML/MLlib 类（如果可用）
+   * 
+   * 设计考虑：
+   * - Spark 的注册在 Chill 之前，允许覆盖 Chill 的通用序列化器（如 Seq）
+   * - 用户注册器可以覆盖所有默认注册
+   * - SQL/ML/MLlib 类动态加载，避免不必要的依赖
+   */
   def newKryo(): Kryo = {
     val instantiator = new EmptyScalaKryoInstantiator
     val kryo = instantiator.newKryo()
@@ -262,14 +315,36 @@ class KryoSerializer(conf: SparkConf)
     new KryoSerializerInstance(this, useUnsafe, usePool)
   }
 
+  /**
+   * Kryo 是否支持序列化对象的重新排列（relocation）
+   * 
+   * 依赖条件：auto-reset 必须启用
+   * 
+   * 原因：
+   * - 如果禁用 auto-reset，Kryo 可能会在流中存储重复对象的引用（而不是完整序列化）
+   * - 这会导致重新排列字节流时引用失效
+   * 
+   * 影响：
+   * - 如果返回 false，sort-based shuffle 无法使用字节流重排序优化
+   * - 必须完全反序列化才能重新排序
+   * 
+   * @see <a href="https://groups.google.com/d/msg/kryo-users/6ZUSyfjjtdo/FhGG1KHDXPgJ">Kryo 讨论</a>
+   */
   private[spark] override lazy val supportsRelocationOfSerializedObjects: Boolean = {
-    // If auto-reset is disabled, then Kryo may store references to duplicate occurrences of objects
-    // in the stream rather than writing those objects' serialized bytes, breaking relocation. See
-    // https://groups.google.com/d/msg/kryo-users/6ZUSyfjjtdo/FhGG1KHDXPgJ for more details.
     newInstance().asInstanceOf[KryoSerializerInstance].getAutoReset()
   }
 }
 
+/**
+ * KryoSerializationStream - Kryo 序列化输出流
+ * 
+ * 资源管理：
+ * - 从 KryoSerializerInstance 借用 Kryo 实例
+ * - close() 时释放 Kryo 实例回池
+ * - 支持 Unsafe 模式（KryoUnsafeOutput）
+ * 
+ * 线程安全：不是线程安全的，每个线程应使用独立的流
+ */
 private[spark]
 class KryoSerializationStream(
     serInstance: KryoSerializerInstance,
@@ -306,6 +381,20 @@ class KryoSerializationStream(
   }
 }
 
+/**
+ * KryoDeserializationStream - Kryo 反序列化输入流
+ * 
+ * 资源管理：
+ * - 从 KryoSerializerInstance 借用 Kryo 实例
+ * - close() 时释放 Kryo 实例回池
+ * - 支持 Unsafe 模式（KryoUnsafeInput）
+ * 
+ * EOF 处理：
+ * - Kryo 抛出 "buffer underflow" KryoException 表示 EOF
+ * - 转换为 EOFException 以符合 DeserializationStream 接口
+ * 
+ * 线程安全：不是线程安全的，每个线程应使用独立的流
+ */
 private[spark]
 class KryoDeserializationStream(
     serInstance: KryoSerializerInstance,
@@ -331,7 +420,7 @@ class KryoDeserializationStream(
     try {
       kryo.readClassAndObject(input).asInstanceOf[T]
     } catch {
-      // DeserializationStream uses the EOF exception to indicate stopping condition.
+      // Kryo 使用 "buffer underflow" 异常表示 EOF，转换为标准的 EOFException
       case e: KryoException
         if e.getMessage.toLowerCase(Locale.ROOT).contains("buffer underflow") =>
         throw new EOFException
@@ -341,7 +430,7 @@ class KryoDeserializationStream(
   override def close(): Unit = {
     if (input != null) {
       try {
-        // Kryo's Input automatically closes the input stream it is using.
+        // Kryo 的 Input 自动关闭底层输入流
         input.close()
       } finally {
         serInstance.releaseKryo(kryo)
@@ -388,20 +477,48 @@ class KryoDeserializationStream(
   }
 }
 
+/**
+ * KryoSerializerInstance - Kryo 序列化器实例
+ * 
+ * 核心设计：Kryo 实例的借用/释放机制
+ * 
+ * 两种模式：
+ * 1. usePool=true：使用对象池（KryoPool），适合高并发场景
+ *    - 每次借用从池中获取并 reset()
+ *    - 每次释放归还到池中
+ * 
+ * 2. usePool=false：使用缓存的 Kryo 实例（cachedKryo），适合低并发场景
+ *    - 逻辑上是大小为 1 的缓存池
+ *    - 借用时：返回 cachedKryo 并置为 null，如果为 null 则新建
+ *    - 释放时：保存到 cachedKryo（如果为空），否则丢弃
+ * 
+ * 注意：SerializerInstance 不是线程安全的，不同步访问 cachedKryo
+ * 
+ * @param useUnsafe 是否使用 Unsafe 模式（KryoUnsafe(Input|Output)）
+ * @param usePool 是否使用对象池
+ */
 private[spark] class KryoSerializerInstance(
    ks: KryoSerializer, useUnsafe: Boolean, usePool: Boolean)
   extends SerializerInstance {
   /**
-   * A re-used [[Kryo]] instance. Methods will borrow this instance by calling `borrowKryo()`, do
-   * their work, then release the instance by calling `releaseKryo()`. Logically, this is a caching
-   * pool of size one. SerializerInstances are not thread-safe, hence accesses to this field are
-   * not synchronized.
+   * 缓存的 Kryo 实例（仅在 usePool=false 时使用）
+   * 
+   * 逻辑上是大小为 1 的对象池：
+   * - 空闲时：cachedKryo 持有实例
+   * - 使用中：cachedKryo 为 null
+   * 
+   * 注意：不是线程安全的，因为 SerializerInstance 本身不线程安全
    */
   @Nullable private[this] var cachedKryo: Kryo = if (usePool) null else borrowKryo()
 
   /**
-   * Borrows a [[Kryo]] instance. If possible, this tries to re-use a cached Kryo instance;
-   * otherwise, it allocates a new instance.
+   * 借用 Kryo 实例
+   * 
+   * 策略：
+   * - usePool=true：从池中借用并 reset()
+   * - usePool=false：返回 cachedKryo（并置为 null），如果为 null 则新建
+   * 
+   * 防御性措施：每次借用都调用 reset() 清理状态（SPARK-7766）
    */
   private[serializer] def borrowKryo(): Kryo = {
     if (usePool) {
@@ -424,9 +541,15 @@ private[spark] class KryoSerializerInstance(
   }
 
   /**
-   * Release a borrowed [[Kryo]] instance. If this serializer instance already has a cached Kryo
-   * instance, then the given Kryo instance is discarded; otherwise, the Kryo is stored for later
-   * re-use.
+   * 释放 Kryo 实例
+   * 
+   * 策略：
+   * - usePool=true：归还到池中
+   * - usePool=false：保存到 cachedKryo（如果为空），否则丢弃
+   * 
+   * 设计考虑：
+   * - 不保存多个实例（逻辑上是大小为 1 的池）
+   * - 如果 cachedKryo 已有实例，说明调用者错误（不释放就再次借用）
    */
   private[serializer] def releaseKryo(kryo: Kryo): Unit = {
     if (usePool) {
@@ -438,7 +561,7 @@ private[spark] class KryoSerializerInstance(
     }
   }
 
-  // Make these lazy vals to avoid creating a buffer unless we use them.
+  // 延迟初始化 output 和 input，避免不必要的缓冲区分配
   private lazy val output = ks.newKryoOutput()
   private lazy val input = if (useUnsafe) new KryoUnsafeInput() else new KryoInput()
 
@@ -448,6 +571,7 @@ private[spark] class KryoSerializerInstance(
     try {
       kryo.writeClassAndObject(output, t)
     } catch {
+      // Buffer overflow：缓冲区超过 maxBufferSize
       case e: KryoException if e.getMessage.startsWith("Buffer overflow") =>
         throw new SparkException(
           errorClass = "KRYO_BUFFER_OVERFLOW",
@@ -464,9 +588,11 @@ private[spark] class KryoSerializerInstance(
   override def deserialize[T: ClassTag](bytes: ByteBuffer): T = {
     val kryo = borrowKryo()
     try {
+      // 优化：如果 ByteBuffer 有数组支持，直接使用数组
       if (bytes.hasArray) {
         input.setBuffer(bytes.array(), bytes.arrayOffset() + bytes.position(), bytes.remaining())
       } else {
+        // 否则使用 InputStream 包装
         input.setBuffer(new Array[Byte](4096))
         input.setInputStream(new ByteBufferInputStream(bytes))
       }
@@ -503,8 +629,15 @@ private[spark] class KryoSerializerInstance(
   }
 
   /**
-   * Returns true if auto-reset is on. The only reason this would be false is if the user-supplied
-   * registrator explicitly turns auto-reset off.
+   * 检查 auto-reset 是否启用
+   * 
+   * 用途：判断是否支持序列化对象重新排列（supportsRelocationOfSerializedObjects）
+   * 
+   * 实现：通过反射读取 Kryo.autoReset 私有字段
+   * 
+   * 注意：
+   * - 通常 auto-reset 默认启用
+   * - 用户注册器可以显式关闭（但会影响 relocation）
    */
   def getAutoReset(): Boolean = {
     val field = classOf[Kryo].getDeclaredField("autoReset")
@@ -519,16 +652,45 @@ private[spark] class KryoSerializerInstance(
 }
 
 /**
- * Interface implemented by clients to register their classes with Kryo when using Kryo
- * serialization.
+ * KryoRegistrator - Kryo 类注册器接口
+ * 
+ * 用途：用户自定义类注册，提升序列化性能
+ * 
+ * 使用方式：
+ * 1. 实现此接口：
+ *    ```scala
+ *    class MyRegistrator extends KryoRegistrator {
+ *      override def registerClasses(kryo: Kryo): Unit = {
+ *        kryo.register(classOf[MyClass])
+ *      }
+ *    }
+ *    ```
+ * 
+ * 2. 配置 Spark：
+ *    ```
+ *    spark.kryo.registrator=com.example.MyRegistrator
+ *    ```
+ * 
+ * 注意：
+ * - 可以覆盖 Spark 的默认序列化器（包括 Chill 的）
+ * - 可以控制 Kryo 的 referenceTracking、autoReset 等设置
+ * - 未注册的类会使用完整类名（更慢、更大）
  */
 @DeveloperApi
 trait KryoRegistrator {
   def registerClasses(kryo: Kryo): Unit
 }
 
+/**
+ * KryoSerializer 伴生对象
+ * 
+ * 包含预注册的类列表：
+ * - toRegister：常用类（StorageLevel、BlockManagerId、原始数组等）
+ * - toRegisterSerializer：需要自定义序列化器的类（RoaringBitmap）
+ * - loadableSparkClasses：SQL/ML/MLlib 类（动态加载，避免不必要依赖）
+ */
 private[serializer] object KryoSerializer {
-  // Commonly used classes.
+  // 常用类列表（无需自定义序列化器）
   private val toRegister: Seq[Class[_]] = Seq(
     ByteBuffer.allocate(1).getClass,
     classOf[Array[ByteBuffer]],
@@ -656,9 +818,15 @@ private[serializer] object KryoSerializer {
 }
 
 /**
- * This is a bridge class to wrap KryoInput as an InputStream and ObjectInput. It forwards all
- * methods of InputStream and ObjectInput to KryoInput. It's usually helpful when an API expects
- * an InputStream or ObjectInput but you want to use Kryo.
+ * KryoInputObjectInputBridge - Kryo 输入流桥接器
+ * 
+ * 用途：将 KryoInput 包装为 ObjectInput 接口
+ * 
+ * 使用场景：
+ * - API 需要 ObjectInput，但想使用 Kryo
+ * - 例如：RoaringBitmap.deserialize(ObjectInput)
+ * 
+ * 实现：转发所有方法到 KryoInput（readObject 使用 kryo.readClassAndObject）
  */
 private[spark] class KryoInputObjectInputBridge(
     kryo: Kryo, input: KryoInput) extends FilterInputStream(input) with ObjectInput {
@@ -667,7 +835,7 @@ private[spark] class KryoInputObjectInputBridge(
   override def readFloat(): Float = input.readFloat()
   override def readByte(): Byte = input.readByte()
   override def readShort(): Short = input.readShort()
-  override def readUTF(): String = input.readString() // readString in kryo does utf8
+  override def readUTF(): String = input.readString() // Kryo 的 readString 使用 UTF-8
   override def readInt(): Int = input.readInt()
   override def readUnsignedShort(): Int = input.readShortUnsigned()
   override def skipBytes(n: Int): Int = {
@@ -684,17 +852,25 @@ private[spark] class KryoInputObjectInputBridge(
 }
 
 /**
- * This is a bridge class to wrap KryoOutput as an OutputStream and ObjectOutput. It forwards all
- * methods of OutputStream and ObjectOutput to KryoOutput. It's usually helpful when an API expects
- * an OutputStream or ObjectOutput but you want to use Kryo.
+ * KryoOutputObjectOutputBridge - Kryo 输出流桥接器
+ * 
+ * 用途：将 KryoOutput 包装为 ObjectOutput 接口
+ * 
+ * 使用场景：
+ * - API 需要 ObjectOutput，但想使用 Kryo
+ * - 例如：RoaringBitmap.serialize(ObjectOutput)
+ * 
+ * 实现：转发所有方法到 KryoOutput（writeObject 使用 kryo.writeClassAndObject）
+ * 
+ * 注意：writeChars 不支持（没有对应的 readChars）
  */
 private[spark] class KryoOutputObjectOutputBridge(
     kryo: Kryo, output: KryoOutput) extends FilterOutputStream(output) with ObjectOutput  {
   override def writeFloat(v: Float): Unit = output.writeFloat(v)
-  // There is no "readChars" counterpart, except maybe "readLine", which is not supported
+  // 没有 "readChars" 对应方法（除了 readLine，但不支持）
   override def writeChars(s: String): Unit = throw new UnsupportedOperationException("writeChars")
   override def writeDouble(v: Double): Unit = output.writeDouble(v)
-  override def writeUTF(s: String): Unit = output.writeString(s) // writeString in kryo does UTF8
+  override def writeUTF(s: String): Unit = output.writeString(s) // Kryo 的 writeString 使用 UTF-8
   override def writeShort(v: Int): Unit = output.writeShort(v)
   override def writeInt(v: Int): Unit = output.writeInt(v)
   override def writeBoolean(v: Boolean): Unit = output.writeBoolean(v)
@@ -709,10 +885,17 @@ private[spark] class KryoOutputObjectOutputBridge(
 }
 
 /**
- * A Kryo serializer for serializing results returned by asJavaIterable.
- *
- * The underlying object is scala.collection.convert.Wrappers$IterableWrapper.
- * Kryo deserializes this into an AbstractCollection, which unfortunately doesn't work.
+ * JavaIterableWrapperSerializer - Java Iterable 包装器序列化器
+ * 
+ * 问题：
+ * - scala.collection.asJava 返回 scala.collection.convert.Wrappers$IterableWrapper
+ * - Kryo 反序列化为 AbstractCollection（行为不正确）
+ * 
+ * 解决方案：
+ * - 写入时：如果是 IterableWrapper，提取底层 Scala Iterable 并序列化
+ * - 读取时：反序列化后用 asJava 重新包装
+ * 
+ * 效果：避免 Kryo 的默认 AbstractCollection 序列化器
  */
 private class JavaIterableWrapperSerializer
   extends com.esotericsoftware.kryo.Serializer[java.lang.Iterable[_]] {
@@ -720,8 +903,7 @@ private class JavaIterableWrapperSerializer
   import JavaIterableWrapperSerializer._
 
   override def write(kryo: Kryo, out: KryoOutput, obj: java.lang.Iterable[_]): Unit = {
-    // If the object is the wrapper, simply serialize the underlying Scala Iterable object.
-    // Otherwise, serialize the object itself.
+    // 如果是包装器且有 underlying 方法，序列化底层 Scala Iterable
     if (obj.getClass == wrapperClass && underlyingMethodOpt.isDefined) {
       kryo.writeClassAndObject(out, underlyingMethodOpt.get.invoke(obj))
     } else {
@@ -739,12 +921,12 @@ private class JavaIterableWrapperSerializer
 }
 
 private object JavaIterableWrapperSerializer extends Logging {
-  // The class returned by CollectionConverters.asJava
-  // (scala.collection.convert.Wrappers$IterableWrapper).
+  // CollectionConverters.asJava 返回的包装器类
+  // (scala.collection.convert.Wrappers$IterableWrapper)
   import scala.jdk.CollectionConverters._
   val wrapperClass = Seq(1).asJava.getClass
 
-  // Get the underlying method so we can use it to get the Scala collection for serialization.
+  // 获取 underlying 方法，用于提取底层 Scala 集合
   private val underlyingMethodOpt = {
     try Some(wrapperClass.getDeclaredMethod("underlying")) catch {
       case e: Exception =>

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -26,11 +27,18 @@ import org.apache.spark.annotation.{Evolving, Since}
 
 
 /**
- * Resource profile builder to build a [[ResourceProfile]] to associate with an RDD.
- * A [[ResourceProfile]] allows the user to specify executor and task resource requirements
- * for an RDD that will get applied during a stage. This allows the user to change the resource
- * requirements between stages.
- *
+ * ResourceProfileBuilder - 构建与 RDD 关联的 ResourceProfile
+ * 
+ * 允许用户为 RDD 指定 Executor 和 Task 的资源需求，这些需求将在 Stage 级别应用。
+ * 使得用户可以在不同 Stage 间更改资源需求。
+ * 
+ * 使用方式：
+ * 1. 创建 ExecutorResourceRequests 和 TaskResourceRequests
+ * 2. 通过 require() 方法添加到 builder
+ * 3. 调用 build() 生成不可变的 ResourceProfile
+ * 
+ * 如果只指定 Task 资源，将创建 TaskResourceProfile；
+ * 如果指定了 Executor 资源，将创建完整的 ResourceProfile。
  */
 @Evolving
 @Since("3.1.0")

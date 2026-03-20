@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -24,7 +25,8 @@ import org.apache.spark.rpc.{RpcCallContext, RpcEnv, ThreadSafeRpcEndpoint}
 import org.apache.spark.storage.BlockManagerMessages.{BlockManagerHeartbeat, StopBlockManagerMaster}
 
 /**
- * Separate heartbeat out of BlockManagerMasterEndpoint due to performance consideration.
+ * 将心跳处理从 BlockManagerMasterEndpoint 中分离出来，出于性能考虑。
+ * 这个独立的端点专门处理 BlockManager 的心跳消息。
  */
 private[spark] class BlockManagerMasterHeartbeatEndpoint(
     override val rpcEnv: RpcEnv,
@@ -44,8 +46,8 @@ private[spark] class BlockManagerMasterHeartbeatEndpoint(
   }
 
   /**
-   * Return true if the driver knows about the given block manager. Otherwise, return false,
-   * indicating that the block manager should re-register.
+   * 收到心跳时返回 true，表示 driver 知道该 block manager。
+   * 否则返回 false，表示 block manager 需要重新注册。
    */
   private def heartbeatReceived(blockManagerId: BlockManagerId): Boolean = {
     if (!blockManagerInfo.contains(blockManagerId)) {

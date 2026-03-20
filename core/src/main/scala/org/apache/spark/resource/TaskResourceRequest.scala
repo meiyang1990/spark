@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -20,17 +21,20 @@ package org.apache.spark.resource
 import org.apache.spark.annotation.{Since, Stable}
 
 /**
- * A task resource request. This is used in conjunction with the [[ResourceProfile]] to
- * programmatically specify the resources needed for an RDD that will be applied at the
- * stage level.
+ * TaskResourceRequest - 任务资源请求
+ * 
+ * 与 ResourceProfile 配合使用，以编程方式指定 RDD 在 Stage 级别所需的 Task 资源。
+ * 
+ * 关键特性：
+ * - amount 使用 Double 类型支持分数资源请求
+ * - 有效值为 <= 1.0 或整数
+ * - 分数资源允许多个任务共享同一资源地址
+ *   例如：amount = 0.5 表示 2 个任务共享 1 个资源地址
+ * 
+ * 建议使用 TaskResourceRequests 类作为便捷 API。
  *
- * Use [[TaskResourceRequests]] class as a convenience API.
- *
- * @param resourceName Resource name
- * @param amount Amount requesting as a Double to support fractional resource requests.
- *               Valid values are less than or equal to 1.0 or whole numbers. This essentially
- *               lets you configure X number of tasks to run on a single resource,
- *               ie amount equals 0.5 translates into 2 tasks per resource address.
+ * @param resourceName 资源名称
+ * @param amount 请求数量（Double 类型，支持分数）
  */
 @Stable
 @Since("3.1.0")
