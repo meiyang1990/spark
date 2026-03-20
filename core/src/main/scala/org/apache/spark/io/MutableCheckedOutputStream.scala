@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -21,29 +22,33 @@ import java.io.OutputStream
 import java.util.zip.Checksum
 
 /**
- * A variant of [[java.util.zip.CheckedOutputStream]] which can
- * change the checksum calculator at runtime.
+ * [[java.util.zip.CheckedOutputStream]] 的变种，允许在运行时改变校验和计算器
  */
 private[spark] class MutableCheckedOutputStream(out: OutputStream) extends OutputStream {
   private var checksum: Checksum = _
 
+  // 设置校验和计算器
   def setChecksum(c: Checksum): Unit = {
     this.checksum = c
   }
 
+  // 写入单个字节并更新校验和
   override def write(b: Int): Unit = {
     assert(checksum != null, "Checksum is not set.")
     checksum.update(b)
     out.write(b)
   }
 
+  // 写入字节数组并更新校验和
   override def write(b: Array[Byte], off: Int, len: Int): Unit = {
     assert(checksum != null, "Checksum is not set.")
     checksum.update(b, off, len)
     out.write(b, off, len)
   }
 
+  // 刷新输出流
   override def flush(): Unit = out.flush()
 
+  // 关闭输出流
   override def close(): Unit = out.close()
 }

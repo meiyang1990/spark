@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,6 +19,6 @@
 package org.apache.spark
 
 /**
- * IO codecs used for compression. See [[org.apache.spark.io.CompressionCodec]].
+ * IO 编解码器用于压缩。详见 [[org.apache.spark.io.CompressionCodec]]
  */
 package object io
