@@ -92,6 +92,21 @@ private[spark] object CallSite {
 
 /**
  * Various utility methods used by Spark.
+ *
+ * 【学习型注释】
+ * Utils 是 Spark 中最核心的工具类，提供了大量底层通用功能。
+ * 主要功能分类：
+ * 1. 文件操作：下载、复制、解压、临时目录管理
+ * 2. 网络工具：获取本地 IP、端口绑定、URI 编解码
+ * 3. 类加载：动态加载类、获取调用栈信息
+ * 4. 序列化辅助：序列化/反序列化流包装
+ * 5. 资源管理：内存计算、大小格式化（如 1GB = 1073741824）
+ * 6. 并发工具：线程池创建、超时执行
+ * 7. Hadoop 集成：配置获取、安全认证
+ * 8. 日志增强：结构化日志、堆栈跟踪格式化
+ *
+ * 该类通过 mixin 多个 trait（SparkClassUtils、SparkFileUtils 等）组合功能，
+ * 是 Spark 各模块（Core、SQL、Streaming 等）的公共依赖。
  */
 private[spark] object Utils
   extends Logging
@@ -360,6 +375,11 @@ private[spark] object Utils
    * If `shouldUntar` is true, it untars the given url if it is a tar.gz or tgz into `targetDir`.
    * This is a legacy behavior, and users should better use `spark.archives` configuration or
    * `SparkContext.addArchive`
+   *
+   * 【学习型注释】
+   * 这是 Spark 中最重要的文件分发方法之一，用于将依赖文件（jar、配置等）下载到 Executor 本地。
+   * 支持多种协议：HTTP/HTTPS、HDFS、S3、本地文件系统等。
+   * 通过文件锁机制保证多个 Executor 不会重复下载同一文件。
    */
   def fetchFile(
       url: String,
@@ -1491,6 +1511,11 @@ private[spark] object Utils
    * This is used, for example, to tell users where in their code each RDD got created.
    *
    * @param skipClass Function that is used to exclude non-user-code classes.
+   *
+   * 【学习型注释】
+   * 这是 Spark Web UI 中显示 "Description" 列的核心方法。
+   * 通过分析调用栈，找到用户代码中调用 Spark API 的位置，用于帮助定位作业来源。
+   * 例如：当用户调用 rdd.map().filter() 时，会显示用户代码的文件名和行号。
    */
   def getCallSite(skipClass: String => Boolean = sparkInternalExclusionFunction): CallSite = {
     // Keep crawling up the stack trace until we find the first function not inside of the spark
@@ -2262,6 +2287,11 @@ private[spark] object Utils
    * @param maxRetries The maximum number of retries when binding to a port.
    * @param serviceName Name of the service.
    * @return (service: T, port: Int)
+   *
+   * 【学习型注释】
+   * 这是 Spark 中服务端口绑定的核心方法，被 Driver、Executor、Master、Worker 等组件广泛使用。
+   * 实现了端口冲突时的自动重试机制：如果指定端口被占用，会尝试下一个端口，直到成功或达到最大重试次数。
+   * 当 startPort 为 0 时，由操作系统随机分配可用端口。
    */
   def startServiceOnPort[T](
       startPort: Int,

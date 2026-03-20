@@ -46,6 +46,15 @@ import org.apache.spark.util.{ShutdownHookManager, SystemClock, Utils}
  * application's event logs are maintained in the application's own sub-directory. This
  * is the same structure as maintained in the event log write code path in
  * EventLoggingListener.
+ *
+ * 【学习型注释】
+ * HistoryServer 是 Spark 历史服务器的核心类，用于展示已完成应用的 SparkUI。
+ * 主要功能：
+ * 1. 从事件日志目录读取已完成应用的历史信息
+ * 2. 提供 Web UI 供用户查看历史作业的执行详情、DAG、Executor 等信息
+ * 3. 使用 ApplicationCache 缓存已加载的 SparkUI，避免重复解析
+ * 4. 支持 REST API 查询应用列表和详细信息
+ * 在非 Standalone 模式（如 YARN、K8s）下，HistoryServer 是查看历史作业的主要入口。
  */
 class HistoryServer(
     conf: SparkConf,
@@ -68,26 +77,30 @@ class HistoryServer(
   // How many applications the summary ui displays
   private[history] val maxApplications = conf.get(History.HISTORY_UI_MAX_APPS);
 
-  // application
+  // 应用历史 UI 缓存，用于复用已加载的 SparkUI 实例
   private val appCache = new ApplicationCache(this, retainedApplications, new SystemClock())
 
   // and its metrics, for testing as well as monitoring
   val cacheMetrics = appCache.metrics
 
+  // 加载器 Servlet，负责根据 URL 路径解析 appId 和 attemptId，加载对应应用的 SparkUI
   private val loaderServlet = new HttpServlet {
+    // 处理 GET 请求，解析 /history/{appId}/{attemptId} 形式的 URL
     protected override def doGet(req: HttpServletRequest, res: HttpServletResponse): Unit = {
 
       res.setContentType("text/html;charset=utf-8")
 
-      // Parse the URI created by getAttemptURI(). It contains an app ID and an optional
-      // attempt ID (separated by a slash).
+      // 解析 URL 路径，提取 appId 和可选的 attemptId
+      // URL 格式: /history/{appId} 或 /history/{appId}/{attemptId}
       val parts = Option(req.getPathInfo()).getOrElse("").split("/")
+      // 路径至少需要包含 appId
       if (parts.length < 2) {
         res.sendRedirect("/")
       }
 
       val appId = parts(1)
       var shouldAppendAttemptId = false
+      // 如果 URL 中没有指定 attemptId，则尝试获取最新的 attempt
       val attemptId = if (parts.length >= 3) {
         Some(parts(2))
       } else {
@@ -100,9 +113,8 @@ class HistoryServer(
         }
       }
 
-      // Since we may have applications with multiple attempts mixed with applications with a
-      // single attempt, we need to try both. Try the single-attempt route first, and if an
-      // error is raised, then try the multiple attempt route.
+      // 尝试加载应用 UI，先尝试单次 attempt 模式，失败后再尝试多次 attempt 模式
+      // 由于可能存在单次和多次 attempt 混合的情况，需要两种方式都尝试
       if (!loadAppUi(appId, None) && (attemptId.isEmpty || !loadAppUi(appId, attemptId))) {
         val msg = <div class="row">Application {appId} not found.</div>
         res.setStatus(HttpServletResponse.SC_NOT_FOUND)
@@ -147,16 +159,23 @@ class HistoryServer(
    *
    * This starts a background thread that periodically synchronizes information displayed on
    * this UI with the event logs in the provided base directory.
+   *
+   * 初始化历史服务器，注册页面处理器和 REST API 处理器。
    */
   def initialize(): Unit = {
+    // 注册历史列表页面，展示所有已完成应用的列表
     attachPage(new HistoryPage(this))
+    // 注册日志页面，用于查看事件日志内容
     attachPage(new LogPage(conf))
 
+    // 注册 REST API 处理器，提供 /api/v1 接口
     attachHandler(ApiRootResource.getServletHandler(this))
 
+    // 注册静态资源处理器（CSS、JS 等）
     addStaticHandler(SparkUI.STATIC_RESOURCE_DIR)
     addRenderLogHandler(this, conf)
 
+    // 创建 Servlet 上下文，将加载器 Servlet 映射到 /history/* 路径
     val contextHandler = new ServletContextHandler
     contextHandler.setContextPath(HistoryServer.UI_PATH_PREFIX)
     contextHandler.addServlet(new ServletHolder(loaderServlet), "/*")
@@ -295,19 +314,32 @@ class HistoryServer(
  *   ./sbin/start-history-server.sh
  *
  * This launches the HistoryServer as a Spark daemon.
+ *
+ * 【学习型注释】
+ * HistoryServer 伴生对象，包含 main 方法作为历史服务器的启动入口。
+ * 推荐通过 start-history-server.sh 脚本启动，通过环境变量 SPARK_HISTORY_OPTS 配置参数。
  */
 object HistoryServer extends Logging {
   private lazy val conf = new SparkConf
 
   val UI_PATH_PREFIX = "/history"
 
+  /**
+   * 历史服务器启动入口。
+   * 1. 初始化日志和安全配置
+   * 2. 创建 ApplicationHistoryProvider（默认为 FsHistoryProvider）
+   * 3. 创建并绑定 HistoryServer
+   * 4. 启动 provider 的后台扫描线程
+   */
   def main(argStrings: Array[String]): Unit = {
     Utils.resetStructuredLogging()
     Utils.initDaemon(log)
     new HistoryServerArguments(conf, argStrings)
+    // 初始化 Kerberos 安全认证（如果启用）
     initSecurity()
     val securityManager = createSecurityManager(conf)
 
+    // 通过反射创建 ApplicationHistoryProvider 实例
     val providerName = conf.get(History.PROVIDER)
     val provider = Utils.classForName[ApplicationHistoryProvider](providerName)
       .getConstructor(classOf[SparkConf])
@@ -315,13 +347,17 @@ object HistoryServer extends Logging {
 
     val port = conf.get(History.HISTORY_SERVER_UI_PORT)
 
+    // 创建并启动 HistoryServer
     val server = new HistoryServer(conf, provider, securityManager, port)
     server.bind()
+    // 启动 provider 的后台线程，定期扫描事件日志目录
     provider.start()
 
+    // 注册 JVM 关闭钩子，确保优雅停止
     ShutdownHookManager.addShutdownHook { () => server.stop() }
 
     // Wait until the end of the world... or if the HistoryServer process is manually stopped
+    // 主线程无限等待，直到进程被手动停止
     while (true) { Thread.sleep(Int.MaxValue) }
   }
 
@@ -347,13 +383,18 @@ object HistoryServer extends Logging {
     new SecurityManager(config)
   }
 
+  /**
+   * 初始化 Kerberos 安全认证。
+   * 如果启用了 Kerberos，则使用 keytab 文件登录，以便能够访问受保护的 HDFS 目录。
+   * 这样可以在 Kerberos ticket 过期后自动重新登录。
+   */
   def initSecurity(): Unit = {
     // If we are accessing HDFS and it has security enabled (Kerberos), we have to login
     // from a keytab file so that we can access HDFS beyond the kerberos ticket expiration.
     // As long as it is using Hadoop rpc (hdfs://), a relogin will automatically
     // occur from the keytab.
     if (conf.get(History.KERBEROS_ENABLED)) {
-      // if you have enabled kerberos the following 2 params must be set
+      // 如果启用 Kerberos，必须配置 principal 和 keytab 参数
       val principalName = conf.get(History.KERBEROS_PRINCIPAL)
         .getOrElse(throw new NoSuchElementException(History.KERBEROS_PRINCIPAL.key))
       val keytabFilename = conf.get(History.KERBEROS_KEYTAB)

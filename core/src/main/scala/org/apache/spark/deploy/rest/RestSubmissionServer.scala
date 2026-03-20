@@ -51,6 +51,15 @@ import org.apache.spark.util.Utils
  * instead of the one expected by the client. If the construction of this error response itself
  * fails, the response will consist of an empty body with a response code that indicates internal
  * server error.
+ *
+ * 【学习型注释】
+ * RestSubmissionServer 是 Spark REST API 提交服务的抽象基类。
+ * 主要功能：
+ * 1. 提供 HTTP REST API，允许通过 HTTP 请求提交、杀死、查询 Spark 应用
+ * 2. 支持的端点包括：/create（提交）、/kill（杀死）、/killall（杀死全部）、/status（状态）、/clear（清理）、/readyz（就绪检查）
+ * 3. 使用 Jetty 作为嵌入式 HTTP 服务器
+ * 4. 所有响应都是 JSON 格式的 SubmitRestProtocolResponse
+ * 这是 spark-submit --deploy-mode cluster 时使用的后端服务。
  */
 private[spark] abstract class RestSubmissionServer(
     val host: String,
@@ -67,19 +76,21 @@ private[spark] abstract class RestSubmissionServer(
   // Visible for testing
   private[rest] var _server: Option[Server] = None
 
-  // A mapping from URL prefixes to servlets that serve them. Exposed for testing.
+  // URL 路径前缀到 Servlet 的映射，定义了 REST API 的路由规则
   protected val baseContext = s"/${RestSubmissionServer.PROTOCOL_VERSION}/submissions"
   protected lazy val contextToServlet = Map[String, RestServlet](
-    s"$baseContext/create/*" -> submitRequestServlet,
-    s"$baseContext/kill/*" -> killRequestServlet,
-    s"$baseContext/killall/*" -> killAllRequestServlet,
-    s"$baseContext/status/*" -> statusRequestServlet,
-    s"$baseContext/clear/*" -> clearRequestServlet,
-    s"$baseContext/readyz/*" -> readyzRequestServlet,
-    "/*" -> new ErrorServlet // default handler
+    s"$baseContext/create/*" -> submitRequestServlet,     // 提交应用
+    s"$baseContext/kill/*" -> killRequestServlet,         // 杀死指定应用
+    s"$baseContext/killall/*" -> killAllRequestServlet,   // 杀死所有应用
+    s"$baseContext/status/*" -> statusRequestServlet,     // 查询应用状态
+    s"$baseContext/clear/*" -> clearRequestServlet,       // 清理已完成的应用
+    s"$baseContext/readyz/*" -> readyzRequestServlet,     // 就绪检查（健康检查）
+    "/*" -> new ErrorServlet // 默认错误处理器
   )
 
-  /** Start the server and return the bound port. */
+  /**
+   * 启动 REST 服务器并返回绑定的端口号。
+   */
   def start(): Int = {
     val (server, boundPort) = Utils.startServiceOnPort[Server](requestedPort, doStart, masterConf)
     _server = Some(server)
@@ -89,12 +100,14 @@ private[spark] abstract class RestSubmissionServer(
   }
 
   /**
-   * Map the servlets to their corresponding contexts and attach them to a server.
-   * Return a 2-tuple of the started server and the bound port.
+   * 将 Servlet 映射到对应的上下文路径并绑定到服务器。
+   * 返回启动的服务器实例和绑定的端口号。
    */
   private def doStart(startPort: Int): (Server, Int) = {
+    // 创建 Jetty 线程池，使用守护线程
     val threadPool = new QueuedThreadPool(masterConf.get(MASTER_REST_SERVER_MAX_THREADS))
     threadPool.setName(getClass().getSimpleName())
+    // Java 21+ 支持虚拟线程，可以提升并发性能
     if (Utils.isJavaVersionAtLeast21 && masterConf.get(MASTER_REST_SERVER_VIRTUAL_THREADS)) {
       val newVirtualThreadPerTaskExecutor =
         classOf[Executors].getMethod("newVirtualThreadPerTaskExecutor")
@@ -104,13 +117,14 @@ private[spark] abstract class RestSubmissionServer(
     threadPool.setDaemon(true)
     val server = new Server(threadPool)
 
-    // Hide information.
+    // 配置 HTTP 连接，隐藏服务器版本信息以提升安全性
     val httpConfig = new HttpConfiguration()
     logDebug("Using setSendServerVersion: false")
     httpConfig.setSendServerVersion(false)
     logDebug("Using setSendXPoweredBy: false")
     httpConfig.setSendXPoweredBy(false)
 
+    // 创建 HTTP 连接器
     val connector = new ServerConnector(
       server,
       null,
@@ -125,12 +139,14 @@ private[spark] abstract class RestSubmissionServer(
     connector.setReuseAddress(!Utils.isWindows)
     server.addConnector(connector)
 
+    // 创建 Servlet 上下文处理器，注册所有路由
     val mainHandler = new ServletContextHandler
     mainHandler.setServer(server)
     mainHandler.setContextPath("/")
     contextToServlet.foreach { case (prefix, servlet) =>
       mainHandler.addServlet(new ServletHolder(servlet), prefix)
     }
+    // 添加自定义过滤器（如果配置了的话）
     addFilters(mainHandler)
     server.setHandler(mainHandler)
     server.start()
@@ -163,12 +179,16 @@ private[rest] object RestSubmissionServer {
 
 /**
  * An abstract servlet for handling requests passed to the [[RestSubmissionServer]].
+ *
+ * 【学习型注释】
+ * RestServlet 是所有 REST API 处理器的基类，提供通用的响应序列化、错误处理等功能。
+ * 子类只需实现具体的业务逻辑（如提交、杀死、查询状态等）。
  */
 private[rest] abstract class RestServlet extends HttpServlet with Logging {
 
   /**
-   * Serialize the given response message to JSON and send it through the response servlet.
-   * This validates the response before sending it to ensure it is properly constructed.
+   * 将响应消息序列化为 JSON 并发送给客户端。
+   * 发送前会验证响应的正确性。
    */
   protected def sendResponse(
       responseMessage: SubmitRestProtocolResponse,
@@ -247,12 +267,13 @@ private[rest] abstract class RestServlet extends HttpServlet with Logging {
 
 /**
  * A servlet for handling kill requests passed to the [[RestSubmissionServer]].
+ *
+ * 处理杀死应用的 REST 请求（POST /kill/{submissionId}）。
  */
 private[rest] abstract class KillRequestServlet extends RestServlet {
 
   /**
-   * If a submission ID is specified in the URL, have the Master kill the corresponding
-   * driver and return an appropriate response to the client. Otherwise, return error.
+   * 处理 POST 请求，从 URL 中解析 submissionId 并杀死对应的 Driver。
    */
   protected override def doPost(
       request: HttpServletRequest,
@@ -355,15 +376,15 @@ private[rest] abstract class StatusRequestServlet extends RestServlet {
 
 /**
  * A servlet for handling submit requests passed to the [[RestSubmissionServer]].
+ *
+ * 处理应用提交的 REST 请求（POST /create）。
+ * 这是 spark-submit --deploy-mode cluster 时实际调用的后端接口。
  */
 private[rest] abstract class SubmitRequestServlet extends RestServlet {
 
   /**
-   * Submit an application to the Master with parameters specified in the request.
-   *
-   * The request is assumed to be a [[SubmitRestProtocolRequest]] in the form of JSON.
-   * If the request is successfully processed, return an appropriate response to the
-   * client indicating so. Otherwise, return error instead.
+   * 处理 POST 请求，解析 JSON 格式的提交请求并将应用提交给 Master。
+   * 请求体是 SubmitRestProtocolRequest 的 JSON 序列化形式。
    */
   protected override def doPost(
       requestServlet: HttpServletRequest,
