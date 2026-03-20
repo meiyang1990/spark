@@ -31,36 +31,29 @@ import org.apache.spark.network.util.ConfigProvider
 import org.apache.spark.network.util.MapConfigProvider
 
 /**
- * SSLOptions class is a common container for SSL configuration options. It offers methods to
- * generate specific objects to configure SSL for different communication protocols.
+ * SSL 配置选项的通用容器类。
+ * 提供方法来生成适用于不同通信协议（如 Jetty、Netty）的 SSL 配置对象。
+ * 旨在提供协议所支持的最大公共 SSL 设置集合。
  *
- * SSLOptions is intended to provide the maximum common set of SSL settings, which are supported
- * by the protocol, which it can generate the configuration for.
- *
- * @param namespace           the configuration namespace
- * @param enabled             enables or disables SSL; if it is set to false, the rest of the
- *                            settings are disregarded
- * @param port                the port where to bind the SSL server; if not defined, it will be
- *                            based on the non-SSL port for the same service.
- * @param keyStore            a path to the key-store file
- * @param keyStorePassword    a password to access the key-store file
- * @param privateKey          a PKCS#8 private key file in PEM format
- * @param privateKeyPassword  a password to access the privateKey file
- * @param keyPassword         a password to access the private key in the key-store
- * @param keyStoreType        the type of the key-store
- * @param needClientAuth      set true if SSL needs client authentication
- * @param certChain           an X.509 certificate chain file in PEM format
- * @param trustStore          a path to the trust-store file
- * @param trustStorePassword  a password to access the trust-store file
- * @param trustStoreType      the type of the trust-store
- * @param trustStoreReloadingEnabled enables or disables using a trust-store that reloads
- *                                   its configuration when the trust-store file on disk changes
- * @param trustStoreReloadIntervalMs the interval, in milliseconds,
- *                                 when the trust-store will reload its configuration
- * @param openSslEnabled      enables or disables using an OpenSSL implementation (if available),
- *                            requires certChain and keyFile arguments
- * @param protocol            SSL protocol (remember that SSLv3 was compromised) supported by Java
- * @param enabledAlgorithms   a set of encryption algorithms that may be used
+ * @param namespace           配置命名空间（如 spark.ssl.rpc）
+ * @param enabled             是否启用 SSL；为 false 时忽略其余设置
+ * @param port                SSL 服务器绑定端口
+ * @param keyStore            密钥库文件路径
+ * @param keyStorePassword    密钥库访问密码
+ * @param privateKey          PKCS#8 PEM 格式的私钥文件
+ * @param privateKeyPassword  私钥文件密码
+ * @param keyPassword         密钥库中私钥的访问密码
+ * @param keyStoreType        密钥库类型
+ * @param needClientAuth      是否需要客户端证书认证（mTLS）
+ * @param certChain           PEM 格式的 X.509 证书链文件
+ * @param trustStore          信任库文件路径
+ * @param trustStorePassword  信任库访问密码
+ * @param trustStoreType      信任库类型
+ * @param trustStoreReloadingEnabled 是否启用信任库自动重加载
+ * @param trustStoreReloadIntervalMs 信任库重加载间隔（毫秒）
+ * @param openSslEnabled      是否启用 OpenSSL 实现（需提供 certChain 和 keyFile）
+ * @param protocol            SSL 协议名称
+ * @param enabledAlgorithms   允许使用的加密算法集合
  */
 private[spark] case class SSLOptions(
     namespace: Option[String] = None,
@@ -85,28 +78,28 @@ private[spark] case class SSLOptions(
     extends Logging {
 
   /**
-   * Creates a Jetty SSL context factory according to the SSL settings represented by this object.
+   * 根据当前 SSL 配置创建 Jetty SslContextFactory.Server 实例。
+   * SSL 未启用时返回 None。
    */
   def createJettySslContextFactoryServer(): Option[SslContextFactory.Server] = {
     if (enabled) {
       val sslContextFactory = new SslContextFactory.Server()
 
+      // 配置密钥库
       keyStore.foreach(file => sslContextFactory.setKeyStorePath(file.getAbsolutePath))
       keyStorePassword.foreach(sslContextFactory.setKeyStorePassword)
       keyPassword.foreach(sslContextFactory.setKeyManagerPassword)
       keyStoreType.foreach(sslContextFactory.setKeyStoreType)
+      // 配置客户端证书认证（mTLS）
       if (needClientAuth) {
         trustStore.foreach(file => sslContextFactory.setTrustStorePath(file.getAbsolutePath))
         trustStorePassword.foreach(sslContextFactory.setTrustStorePassword)
         trustStoreType.foreach(sslContextFactory.setTrustStoreType)
-        /*
-         * Need to pass needClientAuth flag to jetty for Jetty server to authenticate
-         * client certificates. This would help enable mTLS authentication.
-         */
         sslContextFactory.setNeedClientAuth(needClientAuth)
 
       }
       protocol.foreach(sslContextFactory.setProtocol)
+      // 仅包含当前 Java 安全提供者支持的加密算法
       if (supportedAlgorithms.nonEmpty) {
         sslContextFactory.setIncludeCipherSuites(supportedAlgorithms.toSeq: _*)
       }
@@ -117,9 +110,9 @@ private[spark] case class SSLOptions(
     }
   }
 
-  /*
-   * The supportedAlgorithms set is a subset of the enabledAlgorithms that
-   * are supported by the current Java security provider for this protocol.
+  /**
+   * 计算当前 Java 安全提供者实际支持的加密算法子集。
+   * 过滤掉用户配置但不被当前环境支持的算法。
    */
   private val supportedAlgorithms: Set[String] = if (enabledAlgorithms.isEmpty) {
     Set.empty
@@ -155,6 +148,7 @@ private[spark] case class SSLOptions(
     supported
   }
 
+  /** 将 SSL 配置项导出为 Spark 网络层使用的 ConfigProvider（MapConfigProvider） */
   def createConfigProvider(conf: SparkConf): ConfigProvider = {
     val nsp = namespace.getOrElse("spark.ssl")
     val confMap: Map[String, String] = new HashMap[String, String]
@@ -189,47 +183,19 @@ private[spark] case class SSLOptions(
       s"protocol=$protocol, enabledAlgorithms=$enabledAlgorithms}"
 }
 
+/** SSLOptions 伴生对象，提供配置解析和环境变量常量 */
 private[spark] object SSLOptions extends Logging {
 
   /**
-   * Resolves SSLOptions settings from a given Spark configuration object at a given namespace.
+   * 从 SparkConf 中解析指定命名空间的 SSL 配置。
+   * 每个配置项可回退到默认 SSLOptions（如有提供）。
+   * RPC 命名空间不继承默认的 enabled 设置（向后兼容）。
    *
-   * The following settings are allowed:
-   * $ - `[ns].enabled` - `true` or `false`, to enable or disable SSL respectively
-   * $ - `[ns].port` - the port where to bind the SSL server
-   * $ - `[ns].keyStore` - a path to the key-store file; can be relative to the current directory
-   * $ - `[ns].keyStorePassword` - a password to the key-store file
-   * $ - `[ns].privateKey` - a PKCS#8 private key file in PEM format
-   * $ - `[ns].privateKeyPassword` - a password for the above key
-   * $ - `[ns].keyPassword` - a password to the private key in the key store
-   * $ - `[ns].keyStoreType` - the type of the key-store
-   * $ - `[ns].needClientAuth` - whether SSL needs client authentication
-   * $ - `[ns].certChain` - an X.509 certificate chain file in PEM format
-   * $ - `[ns].trustStore` - a path to the trust-store file; can be relative to the current
-   *                         directory
-   * $ - `[ns].trustStorePassword` - a password to the trust-store file
-   * $ - `[ns].trustStoreType` - the type of trust-store
-   * $ - `[ns].trustStoreReloadingEnabled` - enables or disables using a trust-store
-   * that reloads its configuration when the trust-store file on disk changes
-   * $ - `[ns].trustStoreReloadIntervalMs` - the interval, in milliseconds, the
-   * trust-store will reload its configuration
-   * $ - `[ns].openSslEnabled` - enables or disables using an OpenSSL implementation
-   * (if available on host system), requires certChain and keyFile arguments
-   * $ - `[ns].protocol` - a protocol name supported by a particular Java version
-   * $ - `[ns].enabledAlgorithms` - a comma separated list of ciphers
-   *
-   * For a list of protocols and ciphers supported by particular Java versions, you may go to
-   * <a href="https://blogs.oracle.com/java-platform-group/entry/diagnosing_tls_ssl_and_https">
-   * Oracle blog page</a>.
-   *
-   * You can optionally specify the default configuration. If you do, for each setting which is
-   * missing in SparkConf, the corresponding setting is used from the default configuration.
-   *
-   * @param conf Spark configuration object where the settings are collected from
-   * @param hadoopConf Hadoop configuration to get settings
-   * @param ns the namespace name
-   * @param defaults the default configuration
-   * @return [[org.apache.spark.SSLOptions]] object
+   * @param conf 用于读取配置的 SparkConf
+   * @param hadoopConf 用于读取 Hadoop 密码配置
+   * @param ns 命名空间（如 spark.ssl.rpc）
+   * @param defaults 可选的默认 SSLOptions
+   * @return 解析后的 SSLOptions 实例
    */
   def parse(
       conf: SparkConf,
@@ -237,7 +203,7 @@ private[spark] object SSLOptions extends Logging {
       ns: String,
       defaults: Option[SSLOptions] = None): SSLOptions = {
 
-    // RPC does not inherit the default enabled setting due to backwards compatibility reasons
+    // RPC 命名空间出于向后兼容不继承默认 enabled 值
     val enabledDefault = if (ns == "spark.ssl.rpc") {
       false
     } else {
@@ -332,7 +298,7 @@ private[spark] object SSLOptions extends Logging {
       privateKeyPassword)
   }
 
-  // Config names and environment variables for propagating SSL passwords
+  // ===== SSL 密码的配置键和环境变量常量，用于在进程间传播密码 =====
   val SPARK_RPC_SSL_KEY_PASSWORD_CONF = "spark.ssl.rpc.keyPassword"
   val SPARK_RPC_SSL_PRIVATE_KEY_PASSWORD_CONF = "spark.ssl.rpc.privateKeyPassword"
   val SPARK_RPC_SSL_KEY_STORE_PASSWORD_CONF = "spark.ssl.rpc.keyStorePassword"

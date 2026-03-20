@@ -23,23 +23,21 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.util.{ThreadUtils, Utils}
 
 /**
- * Creates a heartbeat thread which will call the specified reportHeartbeat function at
- * intervals of intervalMs.
+ * 心跳线程，按指定间隔定期调用心跳上报函数。
  *
- * @param reportHeartbeat the heartbeat reporting function to call.
- * @param name the thread name for the heartbeater.
- * @param intervalMs the interval between heartbeats.
+ * @param reportHeartbeat 心跳上报回调函数
+ * @param name 心跳线程名称
+ * @param intervalMs 心跳间隔（毫秒）
  */
 private[spark] class Heartbeater(
     reportHeartbeat: () => Unit,
     name: String,
     intervalMs: Long) extends Logging {
-  // Executor for the heartbeat task
+  // 单线程守护调度器
   private val heartbeater = ThreadUtils.newDaemonSingleThreadScheduledExecutor(name)
 
-  /** Schedules a task to report a heartbeat. */
+  /** 启动心跳定时任务，首次延迟随机抖动以避免多个 Executor 同步心跳 */
   def start(): Unit = {
-    // Wait a random interval so the heartbeats don't end up in sync
     val initialDelay = intervalMs + (math.random() * intervalMs).asInstanceOf[Int]
 
     val heartbeatTask = new Runnable() {
@@ -48,14 +46,12 @@ private[spark] class Heartbeater(
     heartbeater.scheduleAtFixedRate(heartbeatTask, initialDelay, intervalMs, TimeUnit.MILLISECONDS)
   }
 
-  /**
-   * Reports a heartbeat.
-   */
+  /** 手动触发一次心跳上报 */
   def doReportHeartbeat(): Unit = {
     reportHeartbeat()
   }
 
-  /** Stops the heartbeat thread. */
+  /** 停止心跳线程 */
   def stop(): Unit = {
     heartbeater.shutdown()
     heartbeater.awaitTermination(10, TimeUnit.SECONDS)

@@ -22,11 +22,11 @@ import org.apache.spark.util.collection.ExternalAppendOnlyMap
 
 /**
  * :: DeveloperApi ::
- * A set of functions used to aggregate data.
+ * Shuffle 阶段使用的数据聚合函数集。
  *
- * @param createCombiner function to create the initial value of the aggregation.
- * @param mergeValue function to merge a new value into the aggregation result.
- * @param mergeCombiners function to merge outputs from multiple mergeValue function.
+ * @param createCombiner 为首次出现的 key 创建初始聚合值
+ * @param mergeValue 将新值合并到已有聚合值中
+ * @param mergeCombiners 合并来自不同分区的两个聚合值
  */
 @DeveloperApi
 case class Aggregator[K, V, C] (
@@ -34,6 +34,7 @@ case class Aggregator[K, V, C] (
     mergeValue: (C, V) => C,
     mergeCombiners: (C, C) => C) {
 
+  /** 在 Map 端按 key 聚合值，使用 ExternalAppendOnlyMap 支持溢写到磁盘 */
   def combineValuesByKey(
       iter: Iterator[_ <: Product2[K, V]],
       context: TaskContext): Iterator[(K, C)] = {
@@ -43,6 +44,7 @@ case class Aggregator[K, V, C] (
     combiners.iterator
   }
 
+  /** 在 Reduce 端合并来自多个 Map 分区的聚合值 */
   def combineCombinersByKey(
       iter: Iterator[_ <: Product2[K, C]],
       context: TaskContext): Iterator[(K, C)] = {
@@ -52,7 +54,7 @@ case class Aggregator[K, V, C] (
     combiners.iterator
   }
 
-  /** Update task metrics after populating the external map. */
+  /** 将 ExternalAppendOnlyMap 的内存/磁盘溢写量和峰值内存使用更新到任务指标 */
   private def updateMetrics(context: TaskContext, map: ExternalAppendOnlyMap[_, _, _]): Unit = {
     Option(context).foreach { c =>
       c.taskMetrics().incMemoryBytesSpilled(map.memoryBytesSpilled)

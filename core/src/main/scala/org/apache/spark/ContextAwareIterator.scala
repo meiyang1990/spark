@@ -21,16 +21,12 @@ import org.apache.spark.annotation.DeveloperApi
 
 /**
  * :: DeveloperApi ::
- * A TaskContext aware iterator.
- *
- * As the Python evaluation consumes the parent iterator in a separate thread,
- * it could consume more data from the parent even after the task ends and the parent is closed.
- * If an off-heap access exists in the parent iterator, it could cause segmentation fault
- * which crashes the executor.
- * Thus, we should use [[ContextAwareIterator]] to stop consuming after the task ends.
+ * TaskContext 感知的迭代器。
+ * 当任务完成或被中断后自动停止消费数据，防止 Python 评估线程在任务结束后
+ * 继续读取父迭代器导致的堆外内存访问段错误。
  *
  * @since 3.1.0
- * @deprecated since 4.0.0 as its only usage for Python evaluation is now extinct
+ * @deprecated 自 4.0.0 起已废弃，因其唯一的 Python 评估使用场景已消除
  */
 @DeveloperApi
 @deprecated("Only usage for Python evaluation is now extinct", "4.0.0")

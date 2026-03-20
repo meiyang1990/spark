@@ -21,39 +21,27 @@ import org.apache.spark.scheduler.ExecutorDecommissionInfo
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * A client that communicates with the cluster manager to request or kill executors.
- * This is currently supported only in Kubernetes and YARN mode.
+ * 与集群管理器通信以请求或销毁 Executor 的客户端接口。
+ * 目前仅在 Kubernetes 和 YARN 模式下支持。
  */
 private[spark] trait ExecutorAllocationClient {
 
-  /** Get the list of currently active executors */
+  /** 获取当前活跃的 Executor ID 列表 */
   private[spark] def getExecutorIds(): Seq[String]
 
   /**
-   * Whether an executor is active. An executor is active when it can be used to execute tasks
-   * for jobs submitted by the application.
-   *
-   * @return whether the executor with the given ID is currently active.
+   * 检查 Executor 是否活跃（可用于执行任务）。
    */
   def isExecutorActive(id: String): Boolean
 
   /**
-   * Update the cluster manager on our scheduling needs. Three bits of information are included
-   * to help it make decisions.
+   * 向集群管理器更新调度需求，包含三项信息帮助其做决策：
    *
-   * @param resourceProfileIdToNumExecutors The total number of executors we'd like to have per
-   *                                        ResourceProfile id. The cluster manager shouldn't kill
-   *                                        any running executor to reach this number, but, if all
-   *                                        existing executors were to die, this is the number
-   *                                        of executors we'd want to be allocated.
-   * @param numLocalityAwareTasksPerResourceProfileId The number of tasks in all active stages that
-   *                                                  have a locality preferences per
-   *                                                  ResourceProfile id. This includes running,
-   *                                                  pending, and completed tasks.
-   * @param hostToLocalTaskCount A map of ResourceProfile id to a map of hosts to the number of
-   *                             tasks from all active stages that would like to like to run on
-   *                             that host. This includes running, pending, and completed tasks.
-   * @return whether the request is acknowledged by the cluster manager.
+   * @param resourceProfileIdToNumExecutors 每个 ResourceProfile 期望的 Executor 总数
+   *         （集群管理器不应为达到此数而 kill 已运行的 Executor）
+   * @param numLocalityAwareTasksPerResourceProfileId 每个 ResourceProfile 中有数据本地性偏好的任务数
+   * @param hostToLocalTaskCount 每个 ResourceProfile 中各主机期望运行的任务数
+   * @return 集群管理器是否确认了此请求
    */
   private[spark] def requestTotalExecutors(
       resourceProfileIdToNumExecutors: Map[Int, Int],
@@ -61,22 +49,19 @@ private[spark] trait ExecutorAllocationClient {
       hostToLocalTaskCount: Map[Int, Map[String, Int]]): Boolean
 
   /**
-   * Request an additional number of executors from the cluster manager for the default
-   * ResourceProfile.
-   * @return whether the request is acknowledged by the cluster manager.
+   * 为默认 ResourceProfile 请求额外的 Executor。
+   * @return 集群管理器是否确认了此请求
    */
   def requestExecutors(numAdditionalExecutors: Int): Boolean
 
   /**
-   * Request that the cluster manager kill the specified executors.
+   * 请求集群管理器 kill 指定的 Executor。
    *
-   * @param executorIds identifiers of executors to kill
-   * @param adjustTargetNumExecutors whether the target number of executors will be adjusted down
-   *                                 after these executors have been killed
-   * @param countFailures if there are tasks running on the executors when they are killed, whether
-    *                     to count those failures toward task failure limits
-   * @param force whether to force kill busy executors, default false
-   * @return the ids of the executors acknowledged by the cluster manager to be removed.
+   * @param executorIds 要 kill 的 Executor ID 列表
+   * @param adjustTargetNumExecutors 是否在 kill 后调低目标 Executor 数
+   * @param countFailures 是否将 kill 时正在运行的任务计为失败
+   * @param force 是否强制 kill 繁忙的 Executor
+   * @return 集群管理器确认移除的 Executor ID 列表
    */
   def killExecutors(
     executorIds: Seq[String],
@@ -85,15 +70,13 @@ private[spark] trait ExecutorAllocationClient {
     force: Boolean = false): Seq[String]
 
   /**
-   * Request that the cluster manager decommission the specified executors.
-   * Default implementation delegates to kill, scheduler must override
-   * if it supports graceful decommissioning.
+   * 请求集群管理器优雅下线指定的 Executor。
+   * 默认实现委托给 kill，如果调度器支持优雅下线需重写此方法。
    *
-   * @param executorsAndDecomInfo identifiers of executors & decom info.
-   * @param adjustTargetNumExecutors whether the target number of executors will be adjusted down
-   *                                 after these executors have been decommissioned.
-   * @param triggeredByExecutor whether the decommission is triggered at executor.
-   * @return the ids of the executors acknowledged by the cluster manager to be removed.
+   * @param executorsAndDecomInfo Executor ID 及其下线信息
+   * @param adjustTargetNumExecutors 是否在下线后调低目标数
+   * @param triggeredByExecutor 是否由 Executor 端触发的下线
+   * @return 集群管理器确认移除的 Executor ID 列表
    */
   def decommissionExecutors(
       executorsAndDecomInfo: Array[(String, ExecutorDecommissionInfo)],
@@ -106,17 +89,8 @@ private[spark] trait ExecutorAllocationClient {
 
 
   /**
-   * Request that the cluster manager decommission the specified executor.
-   * Delegates to decommissionExecutors.
-   *
-   * @param executorId identifiers of executor to decommission
-   * @param decommissionInfo information about the decommission (reason, host loss)
-   * @param adjustTargetNumExecutors if we should adjust the target number of executors.
-   * @param triggeredByExecutor whether the decommission is triggered at executor.
-   *                            (TODO: add a new type like `ExecutorDecommissionInfo` for the
-   *                            case where executor is decommissioned at executor first, so we
-   *                            don't need this extra parameter.)
-   * @return whether the request is acknowledged by the cluster manager.
+   * 请求下线单个 Executor（委托给 decommissionExecutors）。
+   * @return 集群管理器是否确认了此请求
    */
   final def decommissionExecutor(
       executorId: String,
@@ -131,23 +105,16 @@ private[spark] trait ExecutorAllocationClient {
   }
 
   /**
-   * Request that the cluster manager decommission every executor on the specified host.
-   *
-   * @return whether the request is acknowledged by the cluster manager.
+   * 请求下线指定主机上的所有 Executor。
    */
   def decommissionExecutorsOnHost(host: String): Boolean
 
   /**
-   * Request that the cluster manager kill every executor on the specified host.
-   *
-   * @return whether the request is acknowledged by the cluster manager.
+   * 请求 kill 指定主机上的所有 Executor。
    */
   def killExecutorsOnHost(host: String): Boolean
 
-  /**
-   * Request that the cluster manager kill the specified executor.
-   * @return whether the request is acknowledged by the cluster manager.
-   */
+  /** 请求 kill 单个 Executor */
   def killExecutor(executorId: String): Boolean = {
     val killedExecutors = killExecutors(Seq(executorId), adjustTargetNumExecutors = true,
       countFailures = false)

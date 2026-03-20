@@ -17,12 +17,14 @@
 
 package org.apache.spark
 
+/** SparkJobInfo 接口的内部实现类 */
 private class SparkJobInfoImpl (
     val jobId: Int,
     val stageIds: Array[Int],
     val status: JobExecutionStatus)
   extends SparkJobInfo
 
+/** SparkStageInfo 接口的内部实现类 */
 private class SparkStageInfoImpl(
     val stageId: Int,
     val currentAttemptId: Int,
@@ -34,6 +36,7 @@ private class SparkStageInfoImpl(
     val numFailedTasks: Int)
   extends SparkStageInfo
 
+/** SparkExecutorInfo 接口的内部实现类 */
 private class SparkExecutorInfoImpl(
     val host: String,
     val port: Int,

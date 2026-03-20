@@ -21,8 +21,8 @@ import org.apache.spark.annotation.DeveloperApi
 
 /**
  * :: DeveloperApi ::
- * An iterator that wraps around an existing iterator to provide task killing functionality.
- * It works by checking the interrupted flag in [[TaskContext]].
+ * 可中断迭代器，包装已有迭代器并在每次 hasNext 调用时检查任务是否被 kill。
+ * 通过检查 TaskContext 的中断标志实现任务取消功能。
  */
 @DeveloperApi
 class InterruptibleIterator[+T](val context: TaskContext, val delegate: Iterator[T])

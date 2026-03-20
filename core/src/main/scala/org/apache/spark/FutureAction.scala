@@ -31,87 +31,60 @@ import org.apache.spark.util.ThreadUtils
 
 
 /**
- * A future for the result of an action to support cancellation. This is an extension of the
- * Scala Future interface to support cancellation.
+ * Action 结果的 Future 接口，支持取消操作。
+ * 扩展了 Scala 标准 Future 接口，增加了取消功能。
  */
 trait FutureAction[T] extends Future[T] {
-  // Note that we redefine methods of the Future trait here explicitly so we can specify a different
-  // documentation (with reference to the word "action").
 
-  /**
-   * Cancels the execution of this action with an optional reason.
-   */
+  /** 取消此 Action 的执行（可附带取消原因） */
   def cancel(reason: Option[String]): Unit
 
-  /**
-   * Cancels the execution of this action.
-   */
+  /** 取消此 Action 的执行 */
   def cancel(): Unit = cancel(None)
 
   /**
-   * Blocks until this action completes.
-   *
-   * @param atMost maximum wait time, which may be negative (no waiting is done), Duration.Inf
-   *               for unbounded waiting, or a finite positive duration
-   * @return this FutureAction
+   * 阻塞直到此 Action 完成。
+   * @param atMost 最大等待时间
    */
   override def ready(atMost: Duration)(implicit permit: CanAwait): FutureAction.this.type
 
   /**
-   * Awaits and returns the result (of type T) of this action.
-   *
-   * @param atMost maximum wait time, which may be negative (no waiting is done), Duration.Inf
-   *               for unbounded waiting, or a finite positive duration
-   * @throws Exception exception during action execution
-   * @return the result value if the action is completed within the specific maximum wait time
+   * 等待并返回此 Action 的结果。
+   * @param atMost 最大等待时间
    */
   @throws(classOf[Exception])
   override def result(atMost: Duration)(implicit permit: CanAwait): T
 
-  /**
-   * When this action is completed, either through an exception, or a value, applies the provided
-   * function.
-   */
+  /** Action 完成时（无论成功或失败）调用指定的回调函数 */
   def onComplete[U](func: (Try[T]) => U)(implicit executor: ExecutionContext): Unit
 
-  /**
-   * Returns whether the action has already been completed with a value or an exception.
-   */
+  /** 返回此 Action 是否已完成 */
   override def isCompleted: Boolean
 
-  /**
-   * Returns whether the action has been cancelled.
-   */
+  /** 返回此 Action 是否已被取消 */
   def isCancelled: Boolean
 
   /**
-   * The value of this Future.
-   *
-   * If the future is not completed the returned value will be None. If the future is completed
-   * the value will be Some(Success(t)) if it contains a valid result, or Some(Failure(error)) if
-   * it contains an exception.
+   * 此 Future 的当前值。
+   * 未完成返回 None；完成返回 Some(Success(t)) 或 Some(Failure(error))
    */
   override def value: Option[Try[T]]
 
-  /**
-   * Blocks and returns the result of this job.
-   */
+  /** 阻塞并返回此 Job 的结果 */
   @throws(classOf[SparkException])
   def get(): T = ThreadUtils.awaitResult(this, Duration.Inf)
 
   /**
-   * Returns the job IDs run by the underlying async operation.
-   *
-   * This returns the current snapshot of the job list. Certain operations may run multiple
-   * jobs, so multiple calls to this method may return different lists.
+   * 返回底层异步操作已运行的 Job ID 列表。
+   * 某些操作可能运行多个 Job，因此多次调用可能返回不同的列表。
    */
   def jobIds: Seq[Int]
 
 }
 
 /**
- * A [[FutureAction]] holding the result of an action that triggers a single job. Examples include
- * count, collect, reduce.
+ * 触发单个 Job 的 Action 对应的 FutureAction 实现。
+ * 适用于 count、collect、reduce 等操作。
  */
 @DeveloperApi
 class SimpleFutureAction[T] private[spark](jobWaiter: JobWaiter[_], resultFunc: => T)
@@ -119,16 +92,19 @@ class SimpleFutureAction[T] private[spark](jobWaiter: JobWaiter[_], resultFunc: 
 
   @volatile private var _cancelled: Boolean = false
 
+  /** 设置取消标志并通知 JobWaiter 取消 */
   override def cancel(reason: Option[String]): Unit = {
     _cancelled = true
     jobWaiter.cancel(reason)
   }
 
+  /** 委托给 JobWaiter 的 completionFuture 等待完成 */
   override def ready(atMost: Duration)(implicit permit: CanAwait): SimpleFutureAction.this.type = {
     jobWaiter.completionFuture.ready(atMost)
     this
   }
 
+  /** 等待完成并返回结果 */
   @throws(classOf[Exception])
   override def result(atMost: Duration)(implicit permit: CanAwait): T = {
     jobWaiter.completionFuture.ready(atMost)
@@ -136,6 +112,7 @@ class SimpleFutureAction[T] private[spark](jobWaiter: JobWaiter[_], resultFunc: 
     value.get.get
   }
 
+  /** Job 完成时触发回调 */
   override def onComplete[U](func: (Try[T]) => U)(implicit executor: ExecutionContext): Unit = {
     jobWaiter.completionFuture onComplete {_ => func(value.get)}
   }
@@ -144,6 +121,7 @@ class SimpleFutureAction[T] private[spark](jobWaiter: JobWaiter[_], resultFunc: 
 
   override def isCancelled: Boolean = _cancelled
 
+  /** 将 JobWaiter 的结果转换为用户期望的结果类型 */
   override def value: Option[Try[T]] =
     jobWaiter.completionFuture.value.map {res => res.map(_ => resultFunc)}
 
@@ -158,16 +136,12 @@ class SimpleFutureAction[T] private[spark](jobWaiter: JobWaiter[_], resultFunc: 
 
 
 /**
- * Handle via which a "run" function passed to a [[ComplexFutureAction]]
- * can submit jobs for execution.
+ * 传递给 ComplexFutureAction 的 "run" 函数用来提交子 Job 的句柄。
+ * 封装了 SparkContext 的 submitJob 功能以支持取消。
  */
 @DeveloperApi
 trait JobSubmitter {
-  /**
-   * Submit a job for execution and return a FutureAction holding the result.
-   * This is a wrapper around the same functionality provided by SparkContext
-   * to enable cancellation.
-   */
+  /** 提交一个 Job 并返回持有结果的 FutureAction */
   def submitJob[T, U, R](
     rdd: RDD[T],
     processPartition: Iterator[T] => U,
@@ -178,9 +152,9 @@ trait JobSubmitter {
 
 
 /**
- * A [[FutureAction]] for actions that could trigger multiple Spark jobs. Examples include take,
- * takeSample. Cancellation works by setting the cancelled flag to true and cancelling any pending
- * jobs.
+ * 可能触发多个 Spark Job 的 Action 对应的 FutureAction 实现。
+ * 适用于 take、takeSample 等操作。
+ * 取消通过设置 cancelled 标志并取消所有待执行的子 Job 实现。
  */
 @DeveloperApi
 class ComplexFutureAction[T](run : JobSubmitter => Future[T])
@@ -188,17 +162,20 @@ class ComplexFutureAction[T](run : JobSubmitter => Future[T])
 
   @volatile private var _cancelled = false
 
+  // 持有所有已提交的子 FutureAction 列表
   @volatile private var subActions: List[FutureAction[_]] = Nil
 
-  // A promise used to signal the future.
+  // 用 Promise 将 run 函数的 Future 结果桥接给外部
   private val p = Promise[T]().completeWith(run(jobSubmitter))
 
+  /** 取消所有子 Action 并标记 Promise 失败 */
   override def cancel(reason: Option[String]): Unit = synchronized {
     _cancelled = true
     p.tryFailure(new SparkException("Action has been cancelled"))
     subActions.foreach(_.cancel(reason))
   }
 
+  /** 创建 JobSubmitter 实例，在 synchronized 块中提交子 Job（保证原子性检查取消状态） */
   private def jobSubmitter = new JobSubmitter {
     def submitJob[T, U, R](
       rdd: RDD[T],
@@ -206,8 +183,7 @@ class ComplexFutureAction[T](run : JobSubmitter => Future[T])
       partitions: Seq[Int],
       resultHandler: (Int, U) => Unit,
       resultFunc: => R): FutureAction[R] = self.synchronized {
-      // If the action hasn't been cancelled yet, submit the job. The check and the submitJob
-      // command need to be in an atomic block.
+      // 提交前检查是否已取消，检查和提交必须原子执行
       if (!isCancelled) {
         val job = rdd.context.submitJob(
           rdd,
@@ -225,8 +201,6 @@ class ComplexFutureAction[T](run : JobSubmitter => Future[T])
 
   override def isCancelled: Boolean = _cancelled
 
-  @throws(classOf[InterruptedException])
-  @throws(classOf[scala.concurrent.TimeoutException])
   override def ready(atMost: Duration)(implicit permit: CanAwait): this.type = {
     p.future.ready(atMost)(permit)
     this
@@ -245,6 +219,7 @@ class ComplexFutureAction[T](run : JobSubmitter => Future[T])
 
   override def value: Option[Try[T]] = p.future.value
 
+  /** 聚合所有子 Action 的 Job ID */
   def jobIds: Seq[Int] = subActions.flatMap(_.jobIds)
 
   override def transform[S](f: (Try[T]) => Try[S])(implicit e: ExecutionContext): Future[S] =
@@ -255,15 +230,18 @@ class ComplexFutureAction[T](run : JobSubmitter => Future[T])
 }
 
 
+/**
+ * 将 Scala FutureAction 适配为 Java java.util.concurrent.Future 接口的包装器。
+ * 负责类型转换和 Java Future 语义适配（如 isDone 包含取消状态）。
+ */
 private[spark]
 class JavaFutureActionWrapper[S, T](futureAction: FutureAction[S], converter: S => T)
   extends JavaFutureAction[T] {
 
   override def isCancelled: Boolean = futureAction.isCancelled
 
+  /** 按 java.util.Future 语义：完成、异常或取消均返回 true */
   override def isDone: Boolean = {
-    // According to java.util.Future's Javadoc, this returns True if the task was completed,
-    // whether that completion was due to successful execution, an exception, or a cancellation.
     futureAction.isCancelled || futureAction.isCompleted
   }
 
@@ -271,8 +249,8 @@ class JavaFutureActionWrapper[S, T](futureAction: FutureAction[S], converter: S 
     java.util.List.of(futureAction.jobIds.map(Integer.valueOf): _*)
   }
 
+  /** 等待结果完成并执行类型转换，取消时抛 CancellationException，失败时包装为 ExecutionException */
   private def getImpl(timeout: Duration): T = {
-    // This will throw TimeoutException on timeout:
     ThreadUtils.awaitReady(futureAction, timeout)
     futureAction.value.get match {
       case scala.util.Success(value) => converter(value)
@@ -280,7 +258,6 @@ class JavaFutureActionWrapper[S, T](futureAction: FutureAction[S], converter: S 
         if (isCancelled) {
           throw new CancellationException("Job cancelled").initCause(exception)
         } else {
-          // java.util.Future.get() wraps exceptions in ExecutionException
           throw new ExecutionException("Exception thrown by job", exception)
         }
     }
@@ -291,13 +268,11 @@ class JavaFutureActionWrapper[S, T](futureAction: FutureAction[S], converter: S 
   override def get(timeout: Long, unit: TimeUnit): T =
     getImpl(Duration.fromNanos(unit.toNanos(timeout)))
 
+  /** 按 Java Future 语义：已完成时返回 false，否则异步取消并返回 true */
   override def cancel(mayInterruptIfRunning: Boolean): Boolean = synchronized {
     if (isDone) {
-      // According to java.util.Future's Javadoc, this should return false if the task is completed.
       false
     } else {
-      // We're limited in terms of the semantics we can provide here; our cancellation is
-      // asynchronous and doesn't provide a mechanism to not cancel if the job is running.
       futureAction.cancel()
       true
     }

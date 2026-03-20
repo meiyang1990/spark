@@ -24,76 +24,49 @@ import org.apache.spark.status.api.v1.StageStatus
 import org.apache.spark.util.Utils
 
 /**
- * Low-level status reporting APIs for monitoring job and stage progress.
+ * Job 和 Stage 进度的低级状态查询 API。
  *
- * These APIs intentionally provide very weak consistency semantics; consumers of these APIs should
- * be prepared to handle empty / missing information.  For example, a job's stage ids may be known
- * but the status API may not have any information about the details of those stages, so
- * `getStageInfo` could potentially return `None` for a valid stage id.
+ * 这些 API 提供弱一致性语义，使用者应做好处理空/缺失信息的准备。
+ * 例如 Job 的 Stage ID 可能已知，但状态 API 可能还没有这些 Stage 的详情。
  *
- * To limit memory usage, these APIs only provide information on recent jobs / stages.  These APIs
- * will provide information for the last `spark.ui.retainedStages` stages and
- * `spark.ui.retainedJobs` jobs.
- *
- * NOTE: this class's constructor should be considered private and may be subject to change.
+ * 为限制内存使用，仅提供最近 spark.ui.retainedStages 个 Stage
+ * 和 spark.ui.retainedJobs 个 Job 的信息。
  */
 class SparkStatusTracker private[spark] (sc: SparkContext, store: AppStatusStore) {
 
   /**
-   * Return a list of all known jobs in a particular job group.  If `jobGroup` is `null`, then
-   * returns all known jobs that are not associated with a job group.
-   *
-   * The returned list may contain running, failed, and completed jobs, and may vary across
-   * invocations of this method.  This method does not guarantee the order of the elements in
-   * its result.
+   * 获取指定 Job Group 中所有已知 Job 的 ID 列表。
+   * jobGroup 为 null 时返回不属于任何 Job Group 的 Job。
+   * 返回结果可能包含运行中、失败和已完成的 Job。
    */
   def getJobIdsForGroup(jobGroup: String): Array[Int] = {
     val expected = Option(jobGroup)
     store.jobsList(null).filter(_.jobGroup == expected).map(_.jobId).toArray
   }
 
-  /**
-   * Return a list of all known jobs with a particular tag.
-   *
-   * The returned list may contain running, failed, and completed jobs, and may vary across
-   * invocations of this method.  This method does not guarantee the order of the elements in
-   * its result.
-   */
+  /** 获取带有指定 Tag 的所有已知 Job 的 ID 列表 */
   def getJobIdsForTag(jobTag: String): Array[Int] = {
     store.jobsList(null).filter(_.jobTags.contains(jobTag)).map(_.jobId).toArray
   }
 
-  /**
-   * Returns an array containing the ids of all active stages.
-   *
-   * This method does not guarantee the order of the elements in its result.
-   */
+  /** 获取所有活跃 Stage 的 ID 数组 */
   def getActiveStageIds(): Array[Int] = {
     store.stageList(Arrays.asList(StageStatus.ACTIVE)).map(_.stageId).toArray
   }
 
-  /**
-   * Returns an array containing the ids of all active jobs.
-   *
-   * This method does not guarantee the order of the elements in its result.
-   */
+  /** 获取所有活跃 Job 的 ID 数组 */
   def getActiveJobIds(): Array[Int] = {
     store.jobsList(Arrays.asList(JobExecutionStatus.RUNNING)).map(_.jobId).toArray
   }
 
-  /**
-   * Returns job information, or `None` if the job info could not be found or was garbage collected.
-   */
+  /** 获取指定 Job 的信息，找不到或已被 GC 回收时返回 None */
   def getJobInfo(jobId: Int): Option[SparkJobInfo] = {
     store.asOption(store.job(jobId)).map { job =>
       new SparkJobInfoImpl(jobId, job.stageIds.toArray, job.status)
     }
   }
 
-  /**
-   * Returns stage information, or `None` if the stage info could not be found or was
-   * garbage collected.
-   */
+  /** 获取指定 Stage 最近一次尝试的信息，找不到时返回 None */
   def getStageInfo(stageId: Int): Option[SparkStageInfo] = {
     store.asOption(store.lastStageAttempt(stageId)).map { stage =>
       new SparkStageInfoImpl(
@@ -109,9 +82,8 @@ class SparkStatusTracker private[spark] (sc: SparkContext, store: AppStatusStore
   }
 
   /**
-   * Returns information of all known executors, including host, port, cacheSize, numRunningTasks
-   * and memory metrics.
-   * Note this include information for both the driver and executors.
+   * 获取所有已知 Executor 的信息（包括 Driver），
+   * 包含主机、端口、缓存大小、运行任务数和内存指标。
    */
   def getExecutorInfos: Array[SparkExecutorInfo] = {
     store.executorList(true).map { exec =>

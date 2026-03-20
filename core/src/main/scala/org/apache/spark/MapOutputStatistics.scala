@@ -18,10 +18,10 @@
 package org.apache.spark
 
 /**
- * Holds statistics about the output sizes in a map stage. May become a DeveloperApi in the future.
+ * Map Stage 输出大小的统计信息，用于自适应查询优化。
  *
- * @param shuffleId ID of the shuffle
- * @param bytesByPartitionId approximate number of output bytes for each map output partition
- *   (may be inexact due to use of compressed map statuses)
+ * @param shuffleId Shuffle 的 ID
+ * @param bytesByPartitionId 每个 Map 输出分区的近似字节数
+ *        （由于使用压缩 Map 状态，可能不精确）
  */
 private[spark] class MapOutputStatistics(val shuffleId: Int, val bytesByPartitionId: Array[Long])

@@ -22,7 +22,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.hadoop.fs.FileAlreadyExistsException
 
 /**
- * Hadoop file already exists exception thrown from Spark with an error class.
+ * Spark 封装的 Hadoop 文件已存在异常，附带结构化错误类信息。
  */
 private[spark] class SparkFileAlreadyExistsException(
     errorClass: String,

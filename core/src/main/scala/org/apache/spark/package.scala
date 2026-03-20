@@ -20,29 +20,18 @@ package org.apache
 import org.apache.spark.util.VersionUtils
 
 /**
- * Core Spark functionality. [[org.apache.spark.SparkContext]] serves as the main entry point to
- * Spark, while [[org.apache.spark.rdd.RDD]] is the data type representing a distributed collection,
- * and provides most parallel operations.
+ * Spark 核心功能包。SparkContext 是 Spark 的主入口点，
+ * RDD 是表示分布式集合的数据类型，提供大部分并行操作。
  *
- * In addition, [[org.apache.spark.rdd.PairRDDFunctions]] contains operations available only on RDDs
- * of key-value pairs, such as `groupByKey` and `join`; [[org.apache.spark.rdd.DoubleRDDFunctions]]
- * contains operations available only on RDDs of Doubles; and
- * [[org.apache.spark.rdd.SequenceFileRDDFunctions]] contains operations available on RDDs that can
- * be saved as SequenceFiles. These operations are automatically available on any RDD of the right
- * type (e.g. RDD[(Int, Int)] through implicit conversions.
+ * PairRDDFunctions 包含仅适用于键值对 RDD 的操作（如 groupByKey、join）；
+ * DoubleRDDFunctions 包含仅适用于 Double RDD 的操作；
+ * SequenceFileRDDFunctions 包含可保存为 SequenceFile 的操作。
+ * 这些操作通过隐式转换自动可用。
  *
- * Java programmers should reference the [[org.apache.spark.api.java]] package
- * for Spark programming APIs in Java.
- *
- * Classes and methods marked with <span class="experimental badge" style="float: none;">
- * Experimental</span> are user-facing features which have not been officially adopted by the
- * Spark project. These are subject to change or removal in minor releases.
- *
- * Classes and methods marked with <span class="developer badge" style="float: none;">
- * Developer API</span> are intended for advanced users want to extend Spark through lower
- * level interfaces. These are subject to changes or removal in minor releases.
+ * Java 开发者请参考 org.apache.spark.api.java 包。
  */
 package object spark {
+  // Spark 构建版本信息常量
   val SPARK_VERSION: String = SparkBuildInfo.spark_version
   val SPARK_VERSION_SHORT: String = VersionUtils.shortVersion(SparkBuildInfo.spark_version)
   val SPARK_BRANCH: String = SparkBuildInfo.spark_branch

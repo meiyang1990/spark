@@ -20,9 +20,8 @@ package org.apache.spark
 import org.apache.spark.annotation.{DeveloperApi, Since}
 
 /**
- * An evaluator for computing RDD partitions. Spark serializes and sends
- * [[PartitionEvaluatorFactory]] to executors, and then creates [[PartitionEvaluator]] via the
- * factory at the executor side.
+ * RDD 分区计算器接口。Spark 将 PartitionEvaluatorFactory 序列化发送到 Executor，
+ * 然后在 Executor 端通过工厂创建 PartitionEvaluator 实例。
  */
 @DeveloperApi
 @Since("3.5.0")

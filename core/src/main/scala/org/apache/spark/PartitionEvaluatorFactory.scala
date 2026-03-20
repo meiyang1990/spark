@@ -22,9 +22,9 @@ import java.io.Serializable
 import org.apache.spark.annotation.{DeveloperApi, Since}
 
 /**
- * A factory to create [[PartitionEvaluator]]. Spark serializes and sends
- * [[PartitionEvaluatorFactory]] to executors, and then creates [[PartitionEvaluator]] via the
- * factory at the executor side.
+ * PartitionEvaluator 的工厂接口。Spark 将此工厂序列化发送到 Executor，
+ * 然后在 Executor 端创建 PartitionEvaluator 实例。
+ * 每个 RDD 分区创建一个 Evaluator 实例，即单线程使用。
  */
 @DeveloperApi
 @Since("3.5.0")

@@ -26,6 +26,12 @@ import org.apache.hadoop.io.Writable
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.util.Utils
 
+/**
+ * :: DeveloperApi ::
+ * Hadoop Writable 的可序列化包装器。
+ * 使 Hadoop Writable 类型能够通过 Java 序列化机制在 Spark 中传输，
+ * 自定义了 writeObject/readObject 方法实现 ObjectWritable 的序列化。
+ */
 @DeveloperApi
 class SerializableWritable[T <: Writable](@transient var t: T) extends Serializable {
 

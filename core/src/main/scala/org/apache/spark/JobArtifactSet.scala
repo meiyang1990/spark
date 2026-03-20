@@ -62,30 +62,29 @@ private[spark] class JobArtifactSet(
 }
 
 
+/** JobArtifactSet 伴生对象，管理线程级别的会话 Artifact 状态 */
 private[spark] object JobArtifactSet {
-  // For testing.
+  // 空集合，用于测试
   val emptyJobArtifactSet: JobArtifactSet = new JobArtifactSet(
     None, Map.empty, Map.empty, Map.empty)
-  // For testing.
+  // 获取默认 Artifact 集合，用于测试
   def defaultJobArtifactSet: JobArtifactSet = SparkContext.getActive.map(
     getActiveOrDefault).getOrElse(emptyJobArtifactSet)
-  // For testing
+  // 最近一次设置的状态，用于测试
   var lastSeenState: Option[JobArtifactState] = None
 
+  // 线程本地变量，保存当前线程的 Spark Connect 客户端会话状态
   private[this] val currentClientSessionState: ThreadLocal[Option[JobArtifactState]] =
     new ThreadLocal[Option[JobArtifactState]] {
       override def initialValue(): Option[JobArtifactState] = None
     }
 
+  /** 获取当前线程的 JobArtifactState */
   def getCurrentJobArtifactState: Option[JobArtifactState] = currentClientSessionState.get()
 
   /**
-   * Set the Spark Connect specific information in the active client to the underlying
-   * [[JobArtifactSet]].
-   *
-   * @param state Job artifact state.
-   * @return the result from the function applied with [[JobArtifactSet]] specific to
-   *         the active client.
+   * 在指定的 Artifact 状态下执行代码块。
+   * 通过 ThreadLocal 设置 Spark Connect 客户端的会话信息，执行完毕后恢复原状态。
    */
   def withActiveJobArtifactState[T](state: JobArtifactState)(block: => T): T = {
     val oldState = currentClientSessionState.get()
@@ -97,12 +96,9 @@ private[spark] object JobArtifactSet {
   }
 
   /**
-   * When Spark Connect isn't used, we default back to the shared resources.
-   *
-   * @param sc The active [[SparkContext]]
-   * @return A [[JobArtifactSet]] containing a copy of the jars/files/archives.
-   *         If there is an active client, it sets the information from them.
-   *         Otherwise, it falls back to the default in the [[SparkContext]].
+   * 获取当前活跃的或默认的 JobArtifactSet。
+   * 如果有活跃的 Spark Connect 客户端，使用其会话级别的 jars/files/archives；
+   * 否则回退到 SparkContext 的共享资源。
    */
   def getActiveOrDefault(sc: SparkContext): JobArtifactSet = {
     val maybeState = currentClientSessionState.get().map(s => s.copy(

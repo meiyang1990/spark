@@ -20,12 +20,13 @@ package org.apache.spark
 import java.io.File
 
 /**
- * Resolves paths to files added through `SparkContext.addFile()`.
+ * 解析通过 SparkContext.addFile() 添加的文件的绝对路径。
  */
 object SparkFiles {
 
   /**
-   * Get the absolute path of a file added through `SparkContext.addFile()`.
+   * 获取通过 SparkContext.addFile() 添加的文件的绝对路径。
+   * 如果有活跃的 Spark Connect 会话，会加入 UUID 子目录以隔离不同会话的文件。
    */
   def get(filename: String): String = {
     val jobArtifactUUID = JobArtifactSet

@@ -38,8 +38,8 @@ import org.apache.spark.util._
 
 /**
  * :: Experimental ::
- * A [[TaskContext]] with extra contextual info and tooling for tasks in a barrier stage.
- * Use [[BarrierTaskContext#get]] to obtain the barrier context for a running barrier task.
+ * Barrier Stage 中任务专用的 TaskContext，提供额外的上下文信息和同步工具。
+ * 在 barrier 任务中通过 BarrierTaskContext.get() 获取当前上下文。
  */
 @Experimental
 @Since("2.4.0")
@@ -48,16 +48,16 @@ class BarrierTaskContext private[spark] (
 
   import BarrierTaskContext._
 
-  // Find the driver side RPCEndpointRef of the coordinator that handles all the barrier() calls.
+  // 获取 Driver 端 BarrierCoordinator 的 RPC 引用，所有 barrier() 调用都发送到该端点
   private val barrierCoordinator: RpcEndpointRef = {
     val env = SparkEnv.get
     RpcUtils.makeDriverRef("barrierSync", env.conf, env.rpcEnv)
   }
 
-  // Local barrierEpoch that identify a barrier() call from current task, it shall be identical
-  // with the driver side epoch.
+  // 本地 barrier 纪元计数器，每次 barrier() 调用后递增，需与 Driver 端保持一致
   private var barrierEpoch = 0
 
+  /** 记录 barrier 同步的进度日志 */
   private def logProgressInfo(msg: MessageWithContext, startTime: Option[Long]): Unit = {
     val waitMsg = startTime.fold(log"")(st => log", waited " +
       log"for ${MDC(TOTAL_TIME, System.currentTimeMillis() - st)} ms,")
@@ -68,6 +68,11 @@ class BarrierTaskContext private[spark] (
       log" current barrier epoch is ${MDC(BARRIER_EPOCH, barrierEpoch)}.")
   }
 
+  /**
+   * 执行全局 barrier 同步的核心方法。
+   * 向 BarrierCoordinator 发送同步请求，等待所有 barrier 任务到达同步点。
+   * 每秒检查一次任务是否被 kill，被 kill 则中止 RPC。
+   */
   private def runBarrier(message: String, requestMethod: RequestMethod.Value): Array[String] = {
     logProgressInfo(log"has entered the global sync", None)
     logTrace("Current callSite: " + Utils.getCallSite())
@@ -81,36 +86,31 @@ class BarrierTaskContext private[spark] (
         )
       }
     }
-    // Log the update of global sync every 1 minute.
+    // 每分钟打印一次等待日志
     val timerFuture = timer.scheduleAtFixedRate(timerTask, 1, 1, TimeUnit.MINUTES)
 
     try {
+      // 发送可中止的 RPC 请求，设置超长超时（365天），实际超时由 BarrierCoordinator 控制
       val abortableRpcFuture = barrierCoordinator.askAbortable[Array[String]](
         message = RequestToSync(numPartitions(), stageId(), stageAttemptNumber(), taskAttemptId(),
           barrierEpoch, partitionId(), message, requestMethod),
-        // Set a fixed timeout for RPC here, so users shall get a SparkException thrown by
-        // BarrierCoordinator on timeout, instead of RPCTimeoutException from the RPC framework.
         timeout = new RpcTimeout(365.days, "barrierTimeout"))
 
-      // Wait the RPC future to be completed, but every 1 second it will jump out waiting
-      // and check whether current spark task is killed. If killed, then throw
-      // a `TaskKilledException`, otherwise continue wait RPC until it completes.
-
+      // 每秒轮询一次：检查 RPC 是否完成，同时检查任务是否被 kill
       while (!abortableRpcFuture.future.isCompleted) {
         try {
-          // wait RPC future for at most 1 second
           Thread.sleep(1000)
         } catch {
-          case _: InterruptedException => // task is killed by driver
+          case _: InterruptedException => // 任务被 Driver kill
         } finally {
+          // 检查任务是否被中断，被中断则中止 RPC
           Try(taskContext.killTaskIfInterrupted()) match {
-            case ScalaSuccess(_) => // task is still running healthily
+            case ScalaSuccess(_) => // 任务仍在正常运行
             case Failure(e) => abortableRpcFuture.abort(e)
           }
         }
       }
-      // messages which consist of all barrier tasks' messages. The future will return the
-      // desired messages if it is completed successfully. Otherwise, exception could be thrown.
+      // 获取所有 barrier 任务汇聚的消息数组
       val messages = abortableRpcFuture.future.value.get.get
 
       barrierEpoch += 1
@@ -128,43 +128,11 @@ class BarrierTaskContext private[spark] (
 
   /**
    * :: Experimental ::
-   * Sets a global barrier and waits until all tasks in this stage hit this barrier. Similar to
-   * MPI_Barrier function in MPI, the barrier() function call blocks until all tasks in the same
-   * stage have reached this routine.
+   * 设置全局同步屏障，阻塞直到同一 Stage 中所有任务都到达此屏障。
+   * 类似 MPI 的 MPI_Barrier 函数。
    *
-   * CAUTION! In a barrier stage, each task must have the same number of barrier() calls, in all
-   * possible code branches. Otherwise, you may get the job hanging or a SparkException after
-   * timeout. Some examples of '''misuses''' are listed below:
-   * 1. Only call barrier() function on a subset of all the tasks in the same barrier stage, it
-   * shall lead to timeout of the function call.
-   * {{{
-   *   rdd.barrier().mapPartitions { iter =>
-   *       val context = BarrierTaskContext.get()
-   *       if (context.partitionId() == 0) {
-   *           // Do nothing.
-   *       } else {
-   *           context.barrier()
-   *       }
-   *       iter
-   *   }
-   * }}}
-   *
-   * 2. Include barrier() function in a try-catch code block, this may lead to timeout of the
-   * second function call.
-   * {{{
-   *   rdd.barrier().mapPartitions { iter =>
-   *       val context = BarrierTaskContext.get()
-   *       try {
-   *           // Do something that might throw an Exception.
-   *           doSomething()
-   *           context.barrier()
-   *       } catch {
-   *           case e: Exception => logWarning("...", e)
-   *       }
-   *       context.barrier()
-   *       iter
-   *   }
-   * }}}
+   * 注意：在 barrier stage 中，每个任务在所有可能的代码分支中必须有相同数量的 barrier() 调用，
+   * 否则可能导致任务挂起或超时。
    */
   @Experimental
   @Since("2.4.0")
@@ -172,13 +140,8 @@ class BarrierTaskContext private[spark] (
 
   /**
    * :: Experimental ::
-   * Blocks until all tasks in the same stage have reached this routine. Each task passes in
-   * a message and returns with a list of all the messages passed in by each of those tasks.
-   *
-   * CAUTION! The allGather method requires the same precautions as the barrier method
-   *
-   * The message is type String rather than Array[Byte] because it is more convenient for
-   * the user at the cost of worse performance.
+   * 阻塞直到所有任务到达此同步点，每个任务传入一条消息，
+   * 返回所有任务传入的消息列表（全局收集）。
    */
   @Experimental
   @Since("3.0.0")
@@ -186,7 +149,7 @@ class BarrierTaskContext private[spark] (
 
   /**
    * :: Experimental ::
-   * Returns [[BarrierTaskInfo]] for all tasks in this barrier stage, ordered by partition ID.
+   * 获取此 barrier stage 中所有任务的 BarrierTaskInfo，按分区 ID 排序。
    */
   @Experimental
   @Since("2.4.0")
@@ -195,7 +158,7 @@ class BarrierTaskContext private[spark] (
     addressesStr.split(",").map(_.trim()).map(new BarrierTaskInfo(_))
   }
 
-  // delegate methods
+  // ===== 以下方法均委托给内部持有的 taskContext =====
 
   override def isCompleted(): Boolean = taskContext.isCompleted()
 
@@ -292,18 +255,19 @@ class BarrierTaskContext private[spark] (
   }
 }
 
+/** BarrierTaskContext 伴生对象，提供获取当前上下文的静态方法和共享定时器 */
 @Experimental
 @Since("2.4.0")
 object BarrierTaskContext {
   /**
    * :: Experimental ::
-   * Returns the currently active BarrierTaskContext. This can be called inside of user functions to
-   * access contextual information about running barrier tasks.
+   * 获取当前活跃的 BarrierTaskContext。在 barrier 任务的用户函数中调用。
    */
   @Experimental
   @Since("2.4.0")
   def get(): BarrierTaskContext = TaskContext.get().asInstanceOf[BarrierTaskContext]
 
+  // barrier() 调用中用于定期打印等待日志的共享定时器
   private val timer = {
     val executor = ThreadUtils.newDaemonSingleThreadScheduledExecutor(
       "Barrier task timer for barrier() calls.")
