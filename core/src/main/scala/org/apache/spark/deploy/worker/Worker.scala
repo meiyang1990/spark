@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -49,6 +50,23 @@ import org.apache.spark.rpc._
 import org.apache.spark.util.{RpcUtils, SignalUtils, SparkUncaughtExceptionHandler, ThreadUtils, Utils}
 import org.apache.spark.util.ArrayImplicits._
 
+/**
+ * Standalone 集群的工作节点（Worker），负责在物理机器上管理计算资源和执行任务。
+ * 
+ * 主要职责：
+ *   1. 向 Master 注册：启动后向 Master 注册自身的资源（CPU 核心数、内存）
+ *   2. 心跳上报：定期向 Master 发送心跳，维持存活状态
+ *   3. Executor 管理：根据 Master 指令启动/停止 Executor 进程
+ *   4. Driver 管理：在 cluster 模式下运行 Driver 进程
+ *   5. 资源清理：定期清理已完成应用的工作目录
+ *   6. 外部 Shuffle 服务：可选地运行 External Shuffle Service
+ * 
+ * Worker 作为 RPC 端点，接收来自 Master 的调度指令。
+ * 
+ * @param cores 该 Worker 可用的 CPU 核心数
+ * @param memory 该 Worker 可用的内存（MB）
+ * @param masterRpcAddresses 所有 Master 的 RPC 地址（支持多 Master 高可用）
+ */
 private[deploy] class Worker(
     override val rpcEnv: RpcEnv,
     webUiPort: Int,
@@ -70,7 +88,7 @@ private[deploy] class Worker(
   Utils.checkHost(host)
   assert (port > 0)
 
-  // If worker decommissioning is enabled register a handler on the configured signal to shutdown.
+  // 如果启用 Worker 退役功能，注册信号处理器以触发退役流程
   if (conf.get(config.DECOMMISSION_ENABLED)) {
     val signal = conf.get(config.Worker.WORKER_DECOMMISSION_SIGNAL)
     logInfo(log"Registering SIG${MDC(SIGNAL, signal)} handler to trigger decommissioning.")
@@ -83,25 +101,20 @@ private[deploy] class Worker(
     logInfo("Worker decommissioning not enabled.")
   }
 
-  // A scheduled executor used to send messages at the specified time.
+  // 用于延迟发送消息的单线程调度器
   private val forwardMessageScheduler =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-forward-message-scheduler")
 
-  // A separated thread to clean up the workDir and the directories of finished applications.
-  // Used to provide the implicit parameter of `Future` methods.
+  // 单独的线程用于清理工作目录和已完成应用的目录
   private val cleanupThreadExecutor = ExecutionContext.fromExecutorService(
     ThreadUtils.newDaemonSingleThreadExecutor("worker-cleanup-thread"))
 
-  // Send a heartbeat every (heartbeat timeout) / 4 milliseconds
+  // 心跳间隔 = 超时时间 / 4
   private val HEARTBEAT_MILLIS = conf.get(WORKER_TIMEOUT) * 1000 / 4
 
-  // Model retries to connect to the master, after Hadoop's model.
-  // The total number of retries are less than or equal to WORKER_MAX_REGISTRATION_RETRIES.
-  // Within the upper limit, WORKER_MAX_REGISTRATION_RETRIES,
-  // the first WORKER_INITIAL_REGISTRATION_RETRIES attempts to reconnect are in shorter intervals
-  // (between 5 and 15 seconds). Afterwards, the next attempts are between 30 and 90 seconds while
-  // A bit of randomness is introduced so that not all of the workers attempt to reconnect at
-  // the same time.
+  // 注册重试策略（模仿 Hadoop）：
+  // 前几次重试间隔较短（5-15秒），之后间隔较长（30-90秒）
+  // 引入随机因子避免所有 Worker 同时重试
   private val INITIAL_REGISTRATION_RETRIES = conf.get(WORKER_INITIAL_REGISTRATION_RETRIES)
   private val TOTAL_REGISTRATION_RETRIES = conf.get(WORKER_MAX_REGISTRATION_RETRIES)
   if (INITIAL_REGISTRATION_RETRIES > TOTAL_REGISTRATION_RETRIES) {
@@ -527,21 +540,31 @@ private[deploy] class Worker(
         }
 
       case MasterInStandby =>
-        // Ignore. Master not yet ready.
+        // Master 处于 Standby 状态，忽略
     }
   }
 
+  /**
+   * Worker 的核心消息处理方法，处理来自 Master 的调度指令。
+   * 主要消息类型：
+   *   - RegisterWorkerResponse: Master 对注册请求的响应
+   *   - SendHeartbeat: 定时心跳触发
+   *   - LaunchExecutor: 启动 Executor 指令
+   *   - KillExecutor: 停止 Executor 指令
+   *   - LaunchDriver: 启动 Driver 指令（cluster 模式）
+   *   - MasterChanged: Master 切换通知（高可用场景）
+   */
   override def receive: PartialFunction[Any, Unit] = synchronized {
+    // Master 注册响应
     case msg: RegisterWorkerResponse =>
       handleRegisterResponse(msg)
 
+    // 发送心跳到 Master
     case SendHeartbeat =>
       if (connected) { sendToMaster(Heartbeat(workerId, self)) }
 
+    // 工作目录清理（在单独线程中执行，避免阻塞 RPC 端点）
     case WorkDirCleanup =>
-      // Spin up a separate thread (in a future) to do the dir cleanup; don't tie up worker
-      // rpcEndpoint.
-      // Copy ids so that it can be used in the cleanup thread.
       val appIds = (executors.values.map(_.appId) ++ drivers.values.map(_.driverId)).toSet
       try {
         val cleanupFuture: concurrent.Future[Unit] = concurrent.Future {
@@ -549,9 +572,8 @@ private[deploy] class Worker(
           if (appDirs == null) {
             throw new IOException(s"ERROR: Failed to list files in $workDir")
           }
+          // 清理不再运行且超过保留期的应用目录
           appDirs.filter { dir =>
-            // the directory is used by an application - check that the application is not running
-            // when cleaning up
             val appIdFromDir = dir.getName
             val isAppStillRunning = appIds.contains(appIdFromDir)
             dir.isDirectory && !isAppStillRunning &&
@@ -560,10 +582,7 @@ private[deploy] class Worker(
             logInfo(log"Removing directory: ${MDC(PATH, dir.getPath)}")
             Utils.deleteRecursively(dir)
 
-            // Remove some registeredExecutors information of DB in external shuffle service when
-            // #spark.shuffle.service.db.enabled=true, the one which comes to mind is, what happens
-            // if an application is stopped while the external shuffle service is down?
-            // So then it'll leave an entry in the DB and the entry should be removed.
+            // 如果启用外部 Shuffle 服务的 DB，同步移除相关记录
             if (conf.get(config.SHUFFLE_SERVICE_DB_ENABLED) &&
                 conf.get(config.SHUFFLE_SERVICE_ENABLED)) {
               shuffleService.applicationRemoved(dir.getName)
@@ -579,11 +598,13 @@ private[deploy] class Worker(
           logWarning("Failed to cleanup work dir as executor pool was shutdown")
       }
 
+    // Master 切换通知（高可用场景下新 Master 接管）
     case MasterChanged(masterRef, masterWebUiUrl) =>
       logInfo(log"Master has changed, new master is at " +
         log"${MDC(MASTER_URL, masterRef.address.toSparkURL)}")
       changeMaster(masterRef, masterWebUiUrl, masterRef.address)
 
+      // 向新 Master 汇报当前 Executor 和 Driver 状态
       val executorResponses = executors.values.map { e =>
         WorkerExecutorStateResponse(new ExecutorDescription(
           e.appId, e.execId, e.rpId, e.cores, e.memory, e.state), e.resources)
@@ -593,11 +614,13 @@ private[deploy] class Worker(
       masterRef.send(WorkerSchedulerStateResponse(
         workerId, executorResponses.toList, driverResponses.toSeq))
 
+    // Master 要求重新注册
     case ReconnectWorker(masterUrl) =>
       logInfo(
         log"Master with url ${MDC(MASTER_URL, masterUrl)} requested this worker to reconnect.")
       registerWithMaster()
 
+    // 启动 Executor 指令
     case LaunchExecutor(masterUrl, appId, execId, rpId, appDesc, cores_, memory_, resources_) =>
       if (masterUrl != activeMasterUrl) {
         logWarning(log"Invalid Master (${MDC(MASTER_URL, masterUrl)}) " +

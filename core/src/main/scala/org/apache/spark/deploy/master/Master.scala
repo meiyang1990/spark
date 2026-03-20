@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -46,6 +47,19 @@ import org.apache.spark.serializer.{JavaSerializer, Serializer}
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, ThreadUtils, Utils}
 import org.apache.spark.util.ArrayImplicits._
 
+/**
+ * Standalone 集群的主节点（Master），是 Spark Standalone 部署模式的核心组件。
+ * 
+ * 主要职责：
+ *   1. Worker 管理：维护集群中所有 Worker 节点的注册、心跳检测和故障剔除
+ *   2. 应用调度：接收 Client 提交的应用，将 Executor 分配到 Worker 节点上
+ *   3. Driver 管理：在 cluster 模式下调度和监控 Driver 进程
+ *   4. 高可用：支持 ZooKeeper/FileSystem/RocksDB 等多种恢复模式，实现故障转移
+ *   5. REST API：提供应用提交和状态查询的 REST 接口
+ *   6. Web UI：提供集群状态监控界面
+ * 
+ * Master 作为 RPC 端点，接收来自 Worker、Client、Driver 的消息并处理。
+ */
 private[deploy] class Master(
     override val rpcEnv: RpcEnv,
     address: RpcAddress,
@@ -54,39 +68,52 @@ private[deploy] class Master(
     val conf: SparkConf)
   extends ThreadSafeRpcEndpoint with Logging with LeaderElectable {
 
+  // 用于延迟转发消息的单线程调度器
   private val forwardMessageThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("master-forward-message-thread")
 
+  // Driver 和 Application ID 的生成模式
   private val driverIdPattern = conf.get(DRIVER_ID_PATTERN)
   private val appIdPattern = conf.get(APP_ID_PATTERN)
+  // Worker 超时时间（毫秒）
   private val workerTimeoutMs = conf.get(WORKER_TIMEOUT) * 1000
+  // 保留的已完成应用数量（用于 Web UI 显示）
   private val retainedApplications = conf.get(RETAINED_APPLICATIONS)
   private val retainedDrivers = conf.get(RETAINED_DRIVERS)
   private val maxDrivers = conf.get(MAX_DRIVERS)
+  // 清理僵尸进程的迭代次数
   private val reaperIterations = conf.get(REAPER_ITERATIONS)
+  // 故障恢复超时时间
   private val recoveryTimeoutMs =
     conf.get(RECOVERY_TIMEOUT).map(_ * 1000).getOrElse(workerTimeoutMs)
+  // 恢复模式：NONE/ZOOKEEPER/FILESYSTEM/ROCKSDB/CUSTOM
   private val recoveryMode = conf.get(RECOVERY_MODE)
   private val maxExecutorRetries = conf.get(MAX_EXECUTOR_RETRIES)
 
+  // 集群中所有活跃的 Worker 节点
   val workers = new HashSet[WorkerInfo]
+  // 应用 ID 到 ApplicationInfo 的映射
   val idToApp = new HashMap[String, ApplicationInfo]
+  // 等待调度的应用队列
   private val waitingApps = new ArrayBuffer[ApplicationInfo]
+  // 所有注册的应用
   val apps = new HashSet[ApplicationInfo]
 
-  // Visible for testing
+  // Worker ID 到 WorkerInfo 的映射
   private[master] val idToWorker = new HashMap[String, WorkerInfo]
   private val addressToWorker = new HashMap[RpcAddress, WorkerInfo]
 
   private val endpointToApp = new HashMap[RpcEndpointRef, ApplicationInfo]
   private val addressToApp = new HashMap[RpcAddress, ApplicationInfo]
+  // 已完成的应用列表
   private val completedApps = new ArrayBuffer[ApplicationInfo]
   private var nextAppNumber = 0
   private val moduloAppNumber = conf.get(APP_NUMBER_MODULO).getOrElse(0)
 
+  // Driver 相关数据结构
   private val drivers = new HashSet[DriverInfo]
   private val completedDrivers = new ArrayBuffer[DriverInfo]
-  // Drivers currently spooled for scheduling
+  // 等待调度的 Driver 队列
   private val waitingDrivers = new ArrayBuffer[DriverInfo]
   private var nextDriverNumber = 0
 
@@ -236,7 +263,17 @@ private[deploy] class Master(
     self.send(RevokedLeadership)
   }
 
+  /**
+   * Master 的核心消息处理方法，处理来自 Worker、Client、Driver 的各类消息。
+   * 主要消息类型：
+   *   - ElectedLeader: 当选 Leader 后触发恢复流程
+   *   - RegisterWorker: Worker 注册请求
+   *   - RegisterApplication: 应用注册请求
+   *   - Heartbeat: Worker 心跳
+   *   - ExecutorStateChanged/DriverStateChanged: 状态变更通知
+   */
   override def receive: PartialFunction[Any, Unit] = {
+    // 当选为 Leader，开始恢复流程
     case ElectedLeader =>
       val (storedApps, storedDrivers, storedWorkers) = persistenceEngine.readPersistedData(rpcEnv)
       state = if (storedApps.isEmpty && storedDrivers.isEmpty && storedWorkers.isEmpty) {
@@ -257,52 +294,53 @@ private[deploy] class Master(
 
     case CompleteRecovery => completeRecovery()
 
+    // Leader 身份被撤销，关闭 Master
     case RevokedLeadership =>
       logError("Leadership has been revoked -- master shutting down.")
       System.exit(0)
 
+    // Worker 退役请求
     case WorkerDecommissioning(id, workerRef) =>
       if (state == RecoveryState.STANDBY) {
         workerRef.send(MasterInStandby)
       } else {
-        // We use foreach since get gives us an option and we can skip the failures.
         idToWorker.get(id).foreach(decommissionWorker)
       }
 
     case DecommissionWorkers(ids) =>
-      // The caller has already checked the state when handling DecommissionWorkersOnHosts,
-      // so it should not be the STANDBY
       assert(state != RecoveryState.STANDBY)
       ids.foreach ( id =>
-        // We use foreach since get gives us an option and we can skip the failures.
         idToWorker.get(id).foreach { w =>
           decommissionWorker(w)
-          // Also send a message to the worker node to notify.
           w.endpoint.send(DecommissionWorker)
         }
       )
 
+    // Worker 注册请求
     case RegisterWorker(
       id, workerHost, workerPort, workerRef, cores, memory, workerWebUiUrl,
       masterAddress, resources) =>
       handleRegisterWorker(id, workerHost, workerPort, workerRef, cores, memory, workerWebUiUrl,
         masterAddress, resources)
 
+    // 应用注册请求
     case RegisterApplication(description, driver) =>
-      // TODO Prevent repeated registrations from some driver
       if (state == RecoveryState.STANDBY) {
-        // ignore, don't send response
+        // Standby 状态忽略注册请求
       } else {
         logInfo(log"Registering app ${MDC(LogKeys.APP_NAME, description.name)}")
         val app = createApplication(description, driver)
         registerApplication(app)
         logInfo(log"Registered app ${MDC(LogKeys.APP_NAME, description.name)} with" +
           log" ID ${MDC(LogKeys.APP_ID, app.id)}")
+        // 持久化应用信息（用于故障恢复）
         persistenceEngine.addApplication(app)
         driver.send(RegisteredApplication(app.id, self))
+        // 触发资源调度
         schedule()
       }
 
+    // Driver 状态变更
     case DriverStateChanged(driverId, state, exception) =>
       state match {
         case DriverState.ERROR | DriverState.FINISHED | DriverState.KILLED | DriverState.FAILED =>
@@ -311,9 +349,11 @@ private[deploy] class Master(
           throw new Exception(s"Received unexpected state update for driver $driverId: $state")
       }
 
+    // Worker 心跳处理
     case Heartbeat(workerId, worker) =>
       idToWorker.get(workerId) match {
         case Some(workerInfo) =>
+          // 更新最后心跳时间
           workerInfo.lastHeartbeat = System.currentTimeMillis()
         case None =>
           if (workers.map(_.id).contains(workerId)) {
@@ -938,22 +978,28 @@ private[deploy] class Master(
   }
 
   /**
-   * Schedule the currently available resources among waiting apps. This method will be called
-   * every time a new app joins or resource availability changes.
+   * 资源调度的核心方法，在以下情况被调用：
+   *   - 新应用注册时
+   *   - 资源可用性变化时（如 Worker 注册、Executor 完成）
+   * 
+   * 调度策略：
+   *   1. Driver 优先于 Executor 调度
+   *   2. 根据 spreadOutDrivers 配置决定是否在 Worker 间轮询分配 Driver
+   *   3. 调度完 Driver 后，调用 startExecutorsOnWorkers 为等待的应用分配 Executor
    */
   private def schedule(): Unit = {
+    // 只有 ALIVE 状态的 Master 才执行调度
     if (state != RecoveryState.ALIVE) {
       return
     }
-    // Drivers take strict precedence over executors
+    // Driver 调度优先于 Executor
     if (spreadOutDrivers) {
+      // 分散模式：将 Driver 轮询分配到不同 Worker
       val shuffledAliveWorkers = Random.shuffle(workers.toSeq.filter(_.state == WorkerState.ALIVE))
       val numWorkersAlive = shuffledAliveWorkers.size
       var curPos = 0
-      for (driver <- waitingDrivers.toList) { // iterate over a copy of waitingDrivers
-        // We assign workers to each waiting driver in a round-robin fashion. For each driver, we
-        // start from the last worker that was assigned a driver, and continue onwards until we have
-        // explored all alive workers.
+      for (driver <- waitingDrivers.toList) {
+        // 使用轮询方式为每个等待的 Driver 分配 Worker
         var launched = (drivers.size - waitingDrivers.size) >= maxDrivers
         var isClusterIdle = !launched
         var numWorkersVisited = 0
@@ -962,6 +1008,7 @@ private[deploy] class Master(
           isClusterIdle = worker.drivers.isEmpty && worker.executors.isEmpty
           numWorkersVisited += 1
           if (canLaunchDriver(worker, driver.desc)) {
+            // Worker 资源满足要求，启动 Driver
             val allocated = worker.acquireResources(driver.desc.resourceReqs)
             driver.withResources(allocated)
             launchDriver(worker, driver)
@@ -976,7 +1023,7 @@ private[deploy] class Master(
         }
       }
     } else {
-      // Sort by worker ID as a way to be deterministic
+      // 非分散模式：按 Worker ID 排序后顺序分配
       val aliveWorkers = workers.toSeq.filter(_.state == WorkerState.ALIVE).sortBy(_.id)
       for (driver <- waitingDrivers.toList) {
         if ((drivers.size - waitingDrivers.size) < maxDrivers) {
@@ -992,6 +1039,7 @@ private[deploy] class Master(
         }
       }
     }
+    // 为等待的应用启动 Executor
     startExecutorsOnWorkers()
   }
 

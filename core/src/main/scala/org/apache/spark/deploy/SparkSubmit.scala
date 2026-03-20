@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -46,8 +47,9 @@ import org.apache.spark.util._
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * Whether to submit, kill, or request the status of an application.
- * The latter two operations are currently supported only for standalone cluster mode.
+ * 定义 spark-submit 支持的操作类型。
+ * SUBMIT: 提交应用，KILL: 终止应用，REQUEST_STATUS: 查询状态，PRINT_VERSION: 打印版本。
+ * 注意：KILL 和 REQUEST_STATUS 目前仅支持 Standalone 集群模式。
  */
 private[deploy] object SparkSubmitAction extends Enumeration {
   type SparkSubmitAction = Value
@@ -55,10 +57,14 @@ private[deploy] object SparkSubmitAction extends Enumeration {
 }
 
 /**
- * Main gateway of launching a Spark application.
- *
- * This program handles setting up the classpath with relevant Spark dependencies and provides
- * a layer over the different cluster managers and deploy modes that Spark supports.
+ * Spark 应用的主提交入口（spark-submit 命令的核心实现）。
+ * 
+ * 该程序负责：
+ *   1. 设置包含 Spark 相关依赖的 classpath
+ *   2. 屏蔽不同集群管理器（YARN/Standalone/Kubernetes/Local）的差异
+ *   3. 处理不同部署模式（client/cluster）的提交逻辑
+ *   4. 解析 Maven 依赖并下载到本地
+ *   5. 准备子进程的运行环境（参数、classpath、系统属性）
  */
 private[spark] class SparkSubmit extends Logging {
 
@@ -67,30 +73,32 @@ private[spark] class SparkSubmit extends Logging {
   import DependencyUtils._
   import SparkSubmit._
 
+  /**
+   * 提交入口方法，解析命令行参数并根据 action 类型执行相应操作。
+   * 执行流程：解析参数 -> 配置日志 -> 根据 action 分发到 submit/kill/requestStatus/printVersion
+   */
   def doSubmit(args: Array[String]): Unit = {
     val appArgs = parseArguments(args)
     val sparkConf = appArgs.toSparkConf()
 
-    // For interpreters, structured logging is disabled by default to avoid generating mixed
-    // plain text and structured logs on the same console.
+    // 对于解释器（spark-shell/spark-sql），默认禁用结构化日志避免混合输出
     if (isShell(appArgs.primaryResource) || isSqlShell(appArgs.mainClass)) {
       Logging.disableStructuredLogging()
     } else {
-      // For non-shell applications, enable structured logging if it's not explicitly disabled
-      // via the configuration `spark.log.structuredLogging.enabled`.
+      // 对于非 shell 应用，根据配置决定是否启用结构化日志
       Utils.resetStructuredLogging(sparkConf)
     }
 
-    // We should initialize log again after `spark.log.structuredLogging.enabled` effected
+    // 在 spark.log.structuredLogging.enabled 生效后重新初始化日志
     Logging.uninitialize()
 
-    // Initialize logging if it hasn't been done yet. Keep track of whether logging needs to
-    // be reset before the application starts.
+    // 初始化日志（如果尚未初始化），并记录是否需要在应用启动前重置
     val uninitLog = initializeLogIfNecessary(true, silent = true)
 
     if (appArgs.verbose) {
       logInfo(appArgs.toString)
     }
+    // 根据操作类型分发执行
     appArgs.action match {
       case SparkSubmitAction.SUBMIT => submit(appArgs, uninitLog, sparkConf)
       case SparkSubmitAction.KILL => kill(appArgs, sparkConf)
@@ -228,29 +236,30 @@ private[spark] class SparkSubmit extends Logging {
   }
 
   /**
-   * Prepare the environment for submitting an application.
+   * 准备应用提交所需的运行环境，是 spark-submit 的核心方法。
    *
-   * @param args the parsed SparkSubmitArguments used for environment preparation.
-   * @param conf the Hadoop Configuration, this argument will only be set in unit test.
-   * @return a 4-tuple:
-   *        (1) the arguments for the child process,
-   *        (2) a list of classpath entries for the child,
-   *        (3) a map of system properties, and
-   *        (4) the main class for the child
+   * 主要职责：
+   *   1. 识别集群管理器（YARN/Standalone/Kubernetes/Local）
+   *   2. 确定部署模式（client/cluster）
+   *   3. 解析 Maven 依赖并合并到 classpath
+   *   4. 处理 Kerberos 认证
+   *   5. 根据不同集群管理器和部署模式，确定实际执行的 mainClass
    *
-   * Exposed for testing.
+   * @param args 已解析的 SparkSubmitArguments
+   * @param conf Hadoop 配置（仅在单元测试中显式设置）
+   * @return 四元组：(子进程参数, classpath 列表, SparkConf, 主类名)
    */
   private[deploy] def prepareSubmitEnvironment(
       args: SparkSubmitArguments,
       conf: Option[HadoopConfiguration] = None)
       : (Seq[String], Seq[String], SparkConf, String) = {
-    // Return values
+    // 返回值容器
     val childArgs = new ArrayBuffer[String]()
     val childClasspath = new ArrayBuffer[String]()
     val sparkConf = args.toSparkConf()
     var childMainClass = ""
 
-    // Set the cluster manager
+    // 根据 master 参数确定集群管理器类型
     val clusterManager: Int = args.maybeMaster match {
       case Some(v) =>
         assert(args.maybeRemote.isEmpty)
@@ -263,10 +272,10 @@ private[spark] class SparkSubmit extends Logging {
             error("Master must either be yarn or start with spark, k8s, or local")
             -1
         }
-      case None => LOCAL // default master or remote mode.
+      case None => LOCAL // 默认使用 Local 模式
     }
 
-    // Set the deploy mode; default is client mode
+    // 确定部署模式，默认为 client 模式
     val deployMode: Int = args.deployMode match {
       case "client" | null => CLIENT
       case "cluster" => CLUSTER
@@ -954,16 +963,18 @@ private[spark] class SparkSubmit extends Logging {
    *
    * This runs in two steps. First, we prepare the launch environment by setting up
    * the appropriate classpath, system properties, and application arguments for
-   * running the child main class based on the cluster manager and the deploy mode.
-   * Second, we use this launch environment to invoke the main method of the child
-   * main class.
+   * 运行主类，是 spark-submit 实际启动应用的核心方法。
+   * 
+   * 执行两步操作：
+   *   1. 调用 prepareSubmitEnvironment 准备运行环境（根据集群管理器和部署模式确定实际执行的主类）
+   *   2. 使用准备好的环境调用子主类的 main 方法
    *
-   * Note that this main class will not be the one provided by the user if we're
-   * running cluster deploy mode or python applications.
+   * 注意：实际执行的主类可能不是用户指定的类（cluster 模式或 Python 应用时会被替换）
    */
   private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
+    // 准备提交环境，获取子进程参数、classpath、配置和主类
     val (childArgs, childClasspath, sparkConf, childMainClass) = prepareSubmitEnvironment(args)
-    // Let the main class re-initialize the logging system once it starts.
+    // 让主类启动后重新初始化日志系统
     if (uninitLog) {
       Logging.uninitialize()
     }
@@ -971,16 +982,18 @@ private[spark] class SparkSubmit extends Logging {
     if (args.verbose) {
       logInfo(log"Main class:\n${MDC(LogKeys.CLASS_NAME, childMainClass)}")
       logInfo(log"Arguments:\n${MDC(LogKeys.ARGS, childArgs.mkString("\n"))}")
-      // sysProps may contain sensitive information, so redact before printing
+      // sysProps 可能包含敏感信息，打印前进行脱敏处理
       logInfo(log"Spark config:\n" +
       log"${MDC(LogKeys.CONFIG, Utils.redact(sparkConf.getAll.toMap).sorted.mkString("\n"))}")
       logInfo(log"Classpath elements:\n${MDC(LogKeys.CLASS_PATHS, childClasspath.mkString("\n"))}")
       logInfo("\n")
     }
+    // 安全检查：cluster 模式下使用代理用户时，不允许修改 classpath（除非显式配置允许）
     assert(!(args.deployMode == "cluster" && args.proxyUser != null && childClasspath.nonEmpty) ||
       sparkConf.get(ALLOW_CUSTOM_CLASSPATH_BY_PROXY_USER_IN_CLUSTER_MODE),
       s"Classpath of spark-submit should not change in cluster mode if proxy user is specified " +
         s"when ${ALLOW_CUSTOM_CLASSPATH_BY_PROXY_USER_IN_CLUSTER_MODE.key} is disabled")
+    // 获取类加载器并将子 classpath 中的 jar 添加进去
     val loader = getSubmitClassLoader(sparkConf)
     for (jar <- childClasspath) {
       addJarToClasspath(jar, loader)
@@ -988,6 +1001,7 @@ private[spark] class SparkSubmit extends Logging {
 
     var mainClass: Class[_] = null
 
+    // 加载主类
     try {
       mainClass = Utils.classForName(childMainClass)
     } catch {
