@@ -39,7 +39,8 @@ import org.apache.spark.util.{ThreadUtils, Utils}
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * A [[SchedulerBackend]] implementation for Spark's standalone cluster manager.
+ * Spark 独立(Standalone)集群管理器的 [[SchedulerBackend]] 实现。
+ * 通过 StandaloneAppClient 连接到 Standalone Master，管理 Executor 的启动和停止。
  */
 private[spark] class StandaloneSchedulerBackend(
     scheduler: TaskSchedulerImpl,

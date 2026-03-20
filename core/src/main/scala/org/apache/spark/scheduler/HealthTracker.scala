@@ -27,27 +27,22 @@ import org.apache.spark.internal.LogKeys._
 import org.apache.spark.util.{Clock, SystemClock, Utils}
 
 /**
- * HealthTracker is designed to track problematic executors and nodes.  It supports excluding
- * executors and nodes across an entire application (with a periodic expiry). TaskSetManagers add
- * additional logic for exclusion of executors and nodes for individual tasks and stages which
- * works in concert with the logic here.
+ * HealthTracker 用于跟踪有问题的 Executor 和节点。它支持在整个应用程序范围内
+ * 排除(exclude) Executor 和节点（带周期性过期机制）。TaskSetManager 会添加
+ * 额外的逻辑来针对单个任务和 Stage 排除 Executor 和节点，与此处的逻辑协同工作。
  *
- * The tracker needs to deal with a variety of workloads, e.g.:
+ * 追踪器需要处理多种工作负载场景，例如：
+ *  * 错误的用户代码 -- 可能导致大量任务失败，但不应该归咎于单个 Executor
+ *  * 大量小 Stage -- 可能阻止一个坏 Executor 在单个 Stage 内积累大量失败，
+ *      但在整个应用中仍然有很多失败
+ *  * "不稳定"的 Executor -- 不是每个任务都失败，但仍然足够有问题需要被排除
+ *  * 缺失的 Shuffle 文件 -- 可能在健康的 Executor 上触发 Fetch 失败
  *
- *  * bad user code -- this may lead to many task failures, but that should not count against
- *      individual executors
- *  * many small stages -- this may prevent a bad executor for having many failures within one
- *      stage, but still many failures over the entire application
- *  * "flaky" executors -- they don't fail every task, but are still faulty enough to merit
- *      excluding
- *  * missing shuffle files -- may trigger fetch failures on healthy executors.
+ * 参见 SPARK-8425 的设计文档了解更深入的讨论。注意 SPARK-32037 重命名了该功能。
  *
- * See the design doc on SPARK-8425 for a more in-depth discussion. Note SPARK-32037 renamed
- * the feature.
- *
- * THREADING: As with most helpers of TaskSchedulerImpl, this is not thread-safe.  Though it is
- * called by multiple threads, callers must already have a lock on the TaskSchedulerImpl.  The
- * one exception is [[excludedNodeList()]], which can be called without holding a lock.
+ * 线程安全：与 TaskSchedulerImpl 的大多数辅助类一样，此类不是线程安全的。
+ * 虽然它被多个线程调用，但调用者必须已经持有 TaskSchedulerImpl 的锁。
+ * 唯一的例外是 [[excludedNodeList()]]，可以在不持有锁的情况下调用。
  */
 private[scheduler] class HealthTracker (
     private val listenerBus: LiveListenerBus,
@@ -60,47 +55,51 @@ private[scheduler] class HealthTracker (
   }
 
   HealthTracker.validateExcludeOnFailureConfs(conf)
+  /** 每个 Executor 允许的最大失败次数 */
   private val MAX_FAILURES_PER_EXEC = conf.get(config.MAX_FAILURES_PER_EXEC)
+  /** 每个节点允许的最大失败 Executor 数 */
   private val MAX_FAILED_EXEC_PER_NODE = conf.get(config.MAX_FAILED_EXEC_PER_NODE)
+  /** 排除超时时间（毫秒），超时后排除状态自动解除 */
   val EXCLUDE_ON_FAILURE_TIMEOUT_MILLIS = HealthTracker.getExcludeOnFailureTimeout(conf)
+  /** 是否因 Fetch 失败而排除 */
   private val EXCLUDE_FETCH_FAILURE_ENABLED =
     conf.get(config.EXCLUDE_ON_FAILURE_FETCH_FAILURE_ENABLED)
+  /** 是否使用退役（decommission）代替直接杀死排除的 Executor */
   private val EXCLUDE_ON_FAILURE_DECOMMISSION_ENABLED =
     conf.get(config.EXCLUDE_ON_FAILURE_DECOMMISSION_ENABLED)
 
   /**
-   * A map from executorId to information on task failures. Tracks the time of each task failure,
-   * so that we can avoid excluding executors due to failures that are very far apart. We do not
-   * actively remove from this as soon as tasks hit their timeouts, to avoid the time it would take
-   * to do so. But it will not grow too large, because as soon as an executor gets too many
-   * failures, we exclude the executor and remove its entry here.
+   * Executor ID 到任务失败列表的映射。跟踪每个任务失败的时间，
+   * 以避免因时间间隔很长的失败而排除 Executor。
+   * 不会在超时时主动清理，以避免清理的时间开销。但不会增长太大，
+   * 因为一旦 Executor 达到失败上限，就会被排除并移除此处的条目。
    */
   private val executorIdToFailureList = new HashMap[String, ExecutorFailureList]()
+  /** 已排除的 Executor 及其状态 */
   val executorIdToExcludedStatus = new HashMap[String, ExcludedExecutor]()
+  /** 已排除的节点及其过期时间 */
   val nodeIdToExcludedExpiryTime = new HashMap[String, Long]()
   /**
-   * An immutable copy of the set of nodes that are currently excluded.  Kept in an
-   * AtomicReference to make [[excludedNodeList()]] thread-safe.
+   * 当前被排除节点集合的不可变副本。保存在 AtomicReference 中以确保
+   * [[excludedNodeList()]] 的线程安全性。
    */
   private val _excludedNodeList = new AtomicReference[Set[String]](Set())
   /**
-   * Time when the next excluded node will expire.  Used as a shortcut to
-   * avoid iterating over all entries in the excludedNodeList when none will have expired.
+   * 下一个被排除节点的过期时间。用作快捷方式，
+   * 避免在没有过期条目时遍历 excludedNodeList 的所有条目。
    */
   var nextExpiryTime: Long = Long.MaxValue
   /**
-   * Mapping from nodes to all of the executors that have been excluded on that node. We do *not*
-   * remove from this when executors are removed from spark, so we can track when we get multiple
-   * successive excluded executors on one node.  Nonetheless, it will not grow too large because
-   * there cannot be many excluded executors on one node, before we stop requesting more
-   * executors on that node, and we clean up the list of excluded executors once an executor has
-   * been excluded for EXCLUDE_ON_FAILURE_TIMEOUT_MILLIS.
+   * 节点到该节点上所有被排除 Executor 的映射。
+   * 当 Executor 从 Spark 中移除时不会从此映射中移除，以便跟踪一个节点上
+   * 连续多个 Executor 被排除的情况。不会增长太大，因为一个节点上不会有
+   * 太多被排除的 Executor，超时机制也会定期清理。
    */
   val nodeToExcludedExecs = new HashMap[String, HashSet[String]]()
 
   /**
-   * Include executors and nodes that have been excluded for at least
-   * EXCLUDE_ON_FAILURE_TIMEOUT_MILLIS
+   * 将已被排除至少 EXCLUDE_ON_FAILURE_TIMEOUT_MILLIS 的 Executor 和节点
+   * 恢复为可用状态（解除排除）。
    */
   def applyExcludeOnFailureTimeout(): Unit = {
     val now = clock.getTimeMillis()
@@ -142,6 +141,7 @@ private[scheduler] class HealthTracker (
     }
   }
 
+  /** 更新下一个过期时间，取 Executor 和节点中最早的过期时间 */
   private def updateNextExpiryTime(): Unit = {
     val execMinExpiry = if (executorIdToExcludedStatus.nonEmpty) {
       executorIdToExcludedStatus.map{_._2.expiryTime}.min
@@ -156,6 +156,7 @@ private[scheduler] class HealthTracker (
     nextExpiryTime = math.min(execMinExpiry, nodeMinExpiry)
   }
 
+  /** 杀死或退役指定 Executor，根据配置决定使用杀死还是退役方式 */
   private def killExecutor(exec: String, msg: String): Unit = {
     val fullMsg = if (EXCLUDE_ON_FAILURE_DECOMMISSION_ENABLED) {
       s"${msg} (actually decommissioning)"
@@ -217,6 +218,11 @@ private[scheduler] class HealthTracker (
     }
   }
 
+  /**
+   * 因 Fetch 失败更新排除状态。
+   * 如果启用了外部 Shuffle 服务，排除整个节点（因为该节点上所有 Executor 都受影响）；
+   * 否则仅排除发生失败的 Executor。
+   */
   def updateExcludedForFetchFailure(host: String, exec: String): Unit = {
     if (EXCLUDE_FETCH_FAILURE_ENABLED) {
       // If we exclude on fetch failures, we are implicitly saying that we believe the failure is
@@ -261,6 +267,11 @@ private[scheduler] class HealthTracker (
     }
   }
 
+  /**
+   * 当 TaskSet 成功完成时，统计各 Executor 的失败次数。
+   * 如果某 Executor 的累计失败超过阈值，将其排除；
+   * 如果某节点上被排除的 Executor 数超过阈值，排除整个节点。
+   */
   def updateExcludedForSuccessfulTaskSet(
       stageId: Int,
       stageAttemptId: Int,
@@ -315,22 +326,25 @@ private[scheduler] class HealthTracker (
     }
   }
 
+  /** 判断指定 Executor 是否被排除 */
   def isExecutorExcluded(executorId: String): Boolean = {
     executorIdToExcludedStatus.contains(executorId)
   }
 
   /**
-   * Get the full set of nodes that are excluded.  Unlike other methods in this class, this *IS*
-   * thread-safe -- no lock required on a taskScheduler.
+   * 获取所有被排除节点的完整集合。与此类中的其他方法不同，
+   * 此方法是线程安全的——不需要持有 taskScheduler 的锁。
    */
   def excludedNodeList(): Set[String] = {
     _excludedNodeList.get()
   }
 
+  /** 判断指定节点是否被排除 */
   def isNodeExcluded(node: String): Boolean = {
     nodeIdToExcludedExpiryTime.contains(node)
   }
 
+  /** 处理 Executor 被移除事件：清理失败列表，但保留排除状态以支持节点级排除判断 */
   def handleRemovedExecutor(executorId: String): Unit = {
     // We intentionally do not clean up executors that are already excluded in
     // nodeToExcludedExecs, so that if another executor on the same node gets excluded, we can
@@ -342,10 +356,10 @@ private[scheduler] class HealthTracker (
   }
 
   /**
-   * Tracks all failures for one executor (that have not passed the timeout).
+   * 跟踪单个 Executor 上所有未超时的任务失败。
    *
-   * In general we actually expect this to be extremely small, since it won't contain more than the
-   * maximum number of task failures before an executor is failed (default 2).
+   * 通常预期此列表非常小，因为在 Executor 被排除前不会包含超过
+   * 最大任务失败次数（默认为2次）的记录。
    */
   private[scheduler] final class ExecutorFailureList extends Logging {
 
@@ -425,12 +439,12 @@ private[spark] object HealthTracker extends Logging {
   private val DEFAULT_TIMEOUT = "1h"
 
   /**
-   * Returns true if the excludeOnFailure is enabled on the application level,
-   * based on checking the configuration in the following order:
-   * 1. Is application level exclusion specifically enabled or disabled?
-   * 2. Is overall exclusion feature enabled or disabled?
-   * 3. Is it enabled via the legacy timeout conf?
-   * 4. Default is off
+   * 判断应用级别的 excludeOnFailure 是否启用。
+   * 按以下顺序检查配置：
+   * 1. 应用级别的排除是否被明确启用或禁用？
+   * 2. 总体排除功能是否被启用或禁用？
+   * 3. 是否通过遗留超时配置启用？
+   * 4. 默认关闭
    */
   def isExcludeOnFailureEnabled(conf: SparkConf): Boolean = {
     conf.get(config.EXCLUDE_ON_FAILURE_ENABLED_APPLICATION)
@@ -464,13 +478,12 @@ private[spark] object HealthTracker extends Logging {
   }
 
   /**
-   * Verify that exclude on failure configurations are consistent; if not, throw an exception.
-   * Should only be called if excludeOnFailure is enabled.
+   * 验证排除相关配置的一致性；如果不一致则抛出异常。
+   * 仅在 excludeOnFailure 启用时调用。
    *
-   * The configuration is expected to adhere to a few invariants.  Default values
-   * follow these rules of course, but users may unwittingly change one configuration
-   * without making the corresponding adjustment elsewhere. This ensures we fail-fast when
-   * there are such misconfigurations.
+   * 配置需要遵循几个不变量。默认值自然遵循这些规则，
+   * 但用户可能无意中修改了某个配置而没有做相应调整。
+   * 此方法确保在配置不一致时快速失败。
    */
   def validateExcludeOnFailureConfs(conf: SparkConf): Unit = {
 

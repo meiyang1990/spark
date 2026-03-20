@@ -20,7 +20,8 @@ package org.apache.spark.scheduler
 import org.apache.spark.util.ListenerBus
 
 /**
- * A [[SparkListenerEvent]] bus that relays [[SparkListenerEvent]]s to its listeners
+ * [[SparkListenerEvent]] 事件总线，负责将 [[SparkListenerEvent]] 分发给注册的监听器。
+ * 通过模式匹配将事件路由到对应的监听器回调方法。
  */
 private[spark] trait SparkListenerBus
   extends ListenerBus[SparkListenerInterface, SparkListenerEvent] {

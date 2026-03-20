@@ -23,20 +23,19 @@ import org.apache.spark.internal.{config, Logging, LogKeys}
 import org.apache.spark.util.Clock
 
 /**
- * Handles excluding executors and nodes within a taskset.  This includes excluding specific
- * (task, executor) / (task, nodes) pairs, and also completely excluding executors and nodes
- * for the entire taskset.
+ * 处理任务集(TaskSet)内部的 Executor 和节点排除。
+ * 包括排除特定的 (任务, Executor) / (任务, 节点) 对，
+ * 以及完全排除整个任务集的 Executor 和节点。
  *
- * It also must store sufficient information in task failures for application level exclusion,
- * which is handled by [[HealthTracker]].  Note that HealthTracker does not know anything
- * about task failures until a taskset completes successfully.
+ * 它还必须存储任务失败的足够信息以供应用级别排除使用，
+ * 后者由 [[HealthTracker]] 处理。注意 HealthTracker 在任务集成功完成之前
+ * 不知道任何任务失败信息。
  *
- * If isDryRun is true, then this class will only function to store information for application
- * level exclusion, and will not actually exclude any tasks in task/stage level.
+ * 如果 isDryRun 为 true，则此类仅用于存储应用级别排除的信息，
+ * 不会实际在任务/Stage 级别排除任何任务。
  *
- * THREADING:  This class is a helper to [[TaskSetManager]]; as with the methods in
- * [[TaskSetManager]] this class is designed only to be called from code with a lock on the
- * TaskScheduler (e.g. its event handlers). It should not be called from other threads.
+ * 线程安全：此类是 [[TaskSetManager]] 的辅助类；与 [[TaskSetManager]] 中的方法一样，
+ * 此类设计为只能从持有 TaskScheduler 锁的代码中调用，不应从其他线程调用。
  */
 private[scheduler] class TaskSetExcludelist(
     private val listenerBus: LiveListenerBus,
@@ -46,32 +45,38 @@ private[scheduler] class TaskSetExcludelist(
     val clock: Clock,
     val isDryRun: Boolean = false) extends Logging {
 
+  /** 每个 Executor 上允许的最大任务尝试次数 */
   private val MAX_TASK_ATTEMPTS_PER_EXECUTOR = conf.get(config.MAX_TASK_ATTEMPTS_PER_EXECUTOR)
+  /** 每个节点上允许的最大任务尝试次数 */
   private val MAX_TASK_ATTEMPTS_PER_NODE = conf.get(config.MAX_TASK_ATTEMPTS_PER_NODE)
+  /** 每个 Executor 在此 Stage 中允许的最大失败次数 */
   private val MAX_FAILURES_PER_EXEC_STAGE = conf.get(config.MAX_FAILURES_PER_EXEC_STAGE)
+  /** 每个节点在此 Stage 中允许的最大失败 Executor 数 */
   private val MAX_FAILED_EXEC_PER_NODE_STAGE = conf.get(config.MAX_FAILED_EXEC_PER_NODE_STAGE)
 
   /**
-   * A map from each executor to the task failures on that executor.  This is used for exclusion
-   * within this taskset, and it is also relayed onto [[HealthTracker]] for app-level
-   * exlucsion if this taskset completes successfully.
+   * 每个 Executor 到其上任务失败记录的映射。
+   * 用于此任务集内的排除，同时在任务集成功完成后传递给 [[HealthTracker]] 进行应用级别排除。
    */
   val execToFailures = new HashMap[String, ExecutorFailuresInTaskSet]()
 
   /**
-   * Map from node to all executors on it with failures.  Needed because we want to know about
-   * executors on a node even after they have died. (We don't want to bother tracking the
-   * node -> execs mapping in the usual case when there aren't any failures).
+   * 节点到该节点上所有有失败记录的 Executor 的映射。
+   * 需要此映射是因为即使 Executor 已死亡也需要知道节点上的 Executor 信息。
+   * （在没有失败的正常情况下不追踪节点->Executor 映射以减少开销）
    */
   private val nodeToExecsWithFailures = new HashMap[String, HashSet[String]]()
+  /** 节点到该节点上被排除的任务索引集合 */
   private val nodeToExcludedTaskIndexes = new HashMap[String, HashSet[Int]]()
+  /** 完全被排除的 Executor 集合 */
   private val excludedExecs = new HashSet[String]()
+  /** 完全被排除的节点集合 */
   private val excludedNodes = new HashSet[String]()
 
   private var latestFailureReason: String = null
 
   /**
-   * Get the most recent failure reason of this TaskSet.
+   * 获取此 TaskSet 最近的失败原因。
    */
   def getLatestFailureReason: String = {
     latestFailureReason

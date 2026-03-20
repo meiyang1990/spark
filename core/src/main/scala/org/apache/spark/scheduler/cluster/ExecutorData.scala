@@ -21,17 +21,17 @@ import org.apache.spark.rpc.{RpcAddress, RpcEndpointRef}
 import org.apache.spark.scheduler.ExecutorResourceInfo
 
 /**
- * Grouping of data for an executor used by CoarseGrainedSchedulerBackend.
+ * CoarseGrainedSchedulerBackend 使用的 Executor 数据分组。
  *
- * @param executorEndpoint The RpcEndpointRef representing this executor
- * @param executorAddress The network address of this executor
- * @param executorHost The hostname that this executor is running on
- * @param freeCores  The current number of cores available for work on the executor
- * @param totalCores The total number of cores available to the executor
- * @param resourcesInfo The information of the currently available resources on the executor
- * @param resourceProfileId The id of the ResourceProfile being used by this executor
- * @param registrationTs The registration timestamp of this executor
- * @param requestTs What time this executor was most likely requested at
+ * @param executorEndpoint 表示此 Executor 的 RPC 端点引用
+ * @param executorAddress 此 Executor 的网络地址
+ * @param executorHost 此 Executor 运行所在的主机名
+ * @param freeCores Executor 上当前可用的空闲核心数
+ * @param totalCores Executor 可用的总核心数
+ * @param resourcesInfo 当前 Executor 上可用资源的信息
+ * @param resourceProfileId 此 Executor 使用的 ResourceProfile ID
+ * @param registrationTs 此 Executor 的注册时间戳
+ * @param requestTs 此 Executor 最可能的请求时间
  */
 private[cluster] class ExecutorData(
     val executorEndpoint: RpcEndpointRef,

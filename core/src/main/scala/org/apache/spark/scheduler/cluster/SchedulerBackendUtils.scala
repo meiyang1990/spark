@@ -20,13 +20,14 @@ import org.apache.spark.SparkConf
 import org.apache.spark.internal.config.{DYN_ALLOCATION_MAX_EXECUTORS, DYN_ALLOCATION_MIN_EXECUTORS, EXECUTOR_INSTANCES}
 import org.apache.spark.util.Utils
 
+/** 调度器后端工具类 */
 private[spark] object SchedulerBackendUtils {
+  /** 默认 Executor 数量 */
   val DEFAULT_NUMBER_EXECUTORS = 2
 
   /**
-   * Getting the initial target number of executors depends on whether dynamic allocation is
-   * enabled.
-   * If not using dynamic allocation it gets the number of executors requested by the user.
+   * 获取初始目标 Executor 数量，取决于是否启用了动态分配。
+   * 如果未使用动态分配，则获取用户请求的 Executor 数量。
    */
   def getInitialTargetExecutorNumber(
       conf: SparkConf,

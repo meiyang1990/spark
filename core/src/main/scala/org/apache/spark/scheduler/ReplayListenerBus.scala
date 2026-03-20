@@ -30,26 +30,22 @@ import org.apache.spark.scheduler.ReplayListenerBus._
 import org.apache.spark.util.JsonProtocol
 
 /**
- * A SparkListenerBus that can be used to replay events from serialized event data.
+ * 可用于从序列化的事件数据中回放事件的 SparkListenerBus。
+ * 历史服务器使用此类从事件日志文件中重新播放 Spark 应用的执行历史。
  */
 private[spark] class ReplayListenerBus extends SparkListenerBus with Logging {
 
   /**
-   * Replay each event in the order maintained in the given stream. The stream is expected to
-   * contain one JSON-encoded SparkListenerEvent per line.
+   * 按给定流中维护的顺序回放每个事件。流中预期每行包含一个 JSON 编码的 SparkListenerEvent。
    *
-   * This method can be called multiple times, but the listener behavior is undefined after any
-   * error is thrown by this method.
+   * 此方法可以多次调用，但在此方法抛出任何错误后，监听器的行为是未定义的。
    *
-   * @param logData Stream containing event log data.
-   * @param sourceName Filename (or other source identifier) from whence @logData is being read
-   * @param maybeTruncated Indicate whether log file might be truncated (some abnormal situations
-   *        encountered, log file might not finished writing) or not
-   * @param eventsFilter Filter function to select JSON event strings in the log data stream that
-   *        should be parsed and replayed. When not specified, all event strings in the log data
-   *        are parsed and replayed.
-   * @return whether it succeeds to replay the log file entirely without error including
-   *         HaltReplayException. false otherwise.
+   * @param logData 包含事件日志数据的流
+   * @param sourceName 读取 logData 的文件名（或其他来源标识）
+   * @param maybeTruncated 指示日志文件是否可能被截断（某些异常情况下日志文件可能未完成写入）
+   * @param eventsFilter 过滤函数，用于选择日志数据流中应被解析和回放的 JSON 事件字符串。
+   *        未指定时，日志数据中的所有事件字符串都将被解析和回放。
+   * @return 是否成功完整回放日志文件（无错误且无 HaltReplayException），否则返回 false
    */
   def replay(
       logData: InputStream,

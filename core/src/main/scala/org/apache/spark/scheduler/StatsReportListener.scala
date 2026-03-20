@@ -27,7 +27,8 @@ import org.apache.spark.util.{Distribution, Utils}
 
 /**
  * :: DeveloperApi ::
- * Simple SparkListener that logs a few summary statistics when each stage completes.
+ * 简单的 SparkListener 实现，在每个 Stage 完成时记录一些汇总统计信息。
+ * 包括任务运行时间、Shuffle 读写字节数、Fetch 等待时间等指标的分布情况。
  */
 @DeveloperApi
 class StatsReportListener extends SparkListener with Logging {

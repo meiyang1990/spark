@@ -48,11 +48,10 @@ import org.apache.spark.util.{RpcUtils, SerializableBuffer, ThreadUtils, Utils}
 import org.apache.spark.util.ArrayImplicits._
 
 /**
- * A scheduler backend that waits for coarse-grained executors to connect.
- * This backend holds onto each executor for the duration of the Spark job rather than relinquishing
- * executors whenever a task is done and asking the scheduler to launch a new executor for
- * each new task. Executors may be launched in a variety of ways, such as standalone processes for
- * Spark's standalone deploy mode (spark.deploy.*).
+ * 等待粗粒度 Executor 连接的调度器后端。
+ * 此后端在整个 Spark 作业期间持有每个 Executor，而不是在任务完成时释放 Executor
+ * 并要求调度器为每个新任务启动新的 Executor。
+ * Executor 可以通过多种方式启动，例如 Spark 独立部署模式下的独立进程 (spark.deploy.*)。
  */
 private[spark]
 class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: RpcEnv)

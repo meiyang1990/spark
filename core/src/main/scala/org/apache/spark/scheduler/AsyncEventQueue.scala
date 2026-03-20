@@ -29,11 +29,9 @@ import org.apache.spark.internal.config._
 import org.apache.spark.util.Utils
 
 /**
- * An asynchronous queue for events. All events posted to this queue will be delivered to the child
- * listeners in a separate thread.
+ * 异步事件队列。所有投递到此队列的事件将在独立线程中传递给子监听器。
  *
- * Delivery will only begin when the `start()` method is called. The `stop()` method should be
- * called when no more events need to be delivered.
+ * 只有调用 `start()` 方法后才开始投递。当不再需要投递事件时应调用 `stop()` 方法。
  */
 private class AsyncEventQueue(
     val name: String,

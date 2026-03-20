@@ -38,20 +38,19 @@ import org.apache.spark.util.{AccumulatorV2, Clock, LongAccumulator, SystemClock
 import org.apache.spark.util.collection.PercentileHeap
 
 /**
- * Schedules the tasks within a single TaskSet in the TaskSchedulerImpl. This class keeps track of
- * each task, retries tasks if they fail (up to a limited number of times), and
- * handles locality-aware scheduling for this TaskSet via delay scheduling. The main interfaces
- * to it are resourceOffer, which asks the TaskSet whether it wants to run a task on one node,
- * and handleSuccessfulTask/handleFailedTask, which tells it that one of its tasks changed state
- *  (e.g. finished/failed).
+ * 在 TaskSchedulerImpl 中调度单个 TaskSet 内任务的管理器。
+ * 此类跟踪每个任务，在任务失败时重试（最多有限次数），
+ * 并通过延迟调度为此 TaskSet 处理本地性感知调度。
+ * 主要接口为：
+ * - resourceOffer：询问 TaskSet 是否想在某个节点上运行任务
+ * - handleSuccessfulTask/handleFailedTask：通知任务状态变化（如完成/失败）
  *
- * THREADING: This class is designed to only be called from code with a lock on the
- * TaskScheduler (e.g. its event handlers). It should not be called from other threads.
+ * 线程安全：此类设计为只能从持有 TaskScheduler 锁的代码中调用
+ * （例如其事件处理器），不应从其他线程调用。
  *
- * @param sched           the TaskSchedulerImpl associated with the TaskSetManager
- * @param taskSet         the TaskSet to manage scheduling for
- * @param maxTaskFailures if any particular task fails this number of times, the entire
- *                        task set will be aborted
+ * @param sched           关联的 TaskSchedulerImpl
+ * @param taskSet         需要调度管理的 TaskSet
+ * @param maxTaskFailures 如果某个特定任务失败达到此次数，整个任务集将被中止
  */
 private[spark] class TaskSetManager(
     sched: TaskSchedulerImpl,

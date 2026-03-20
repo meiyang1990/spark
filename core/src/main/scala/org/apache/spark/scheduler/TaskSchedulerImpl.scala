@@ -44,41 +44,33 @@ import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util.{AccumulatorV2, Clock, SystemClock, ThreadUtils, Utils}
 
 /**
- * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
- * It can also work with a local setup by using a `LocalSchedulerBackend` and setting
- * isLocal to true. It handles common logic, like determining a scheduling order across jobs, waking
- * up to launch speculative tasks, etc.
+ * 通过 SchedulerBackend 为多种集群类型调度任务的核心实现。
+ * 也可以通过使用 `LocalSchedulerBackend` 并设置 isLocal=true 在本地模式下工作。
+ * 它处理通用逻辑，如确定跨作业的调度顺序、唤醒以启动推测执行任务等。
  *
- * Clients should first call initialize() and start(), then submit task sets through the
- * submitTasks method.
+ * 客户端应先调用 initialize() 和 start()，然后通过 submitTasks 方法提交任务集。
  *
- * THREADING: [[SchedulerBackend]]s and task-submitting clients can call this class from multiple
- * threads, so it needs locks in public API methods to maintain its state. In addition, some
- * [[SchedulerBackend]]s synchronize on themselves when they want to send events here, and then
- * acquire a lock on us, so we need to make sure that we don't try to lock the backend while
- * we are holding a lock on ourselves.  This class is called from many threads, notably:
- *   * The DAGScheduler Event Loop
- *   * The RPCHandler threads, responding to status updates from Executors
- *   * Periodic revival of all offers from the CoarseGrainedSchedulerBackend, to accommodate delay
- *      scheduling
- *   * task-result-getter threads
+ * 线程安全：[[SchedulerBackend]] 和提交任务的客户端可以从多个线程调用此类，
+ * 因此需要在公共 API 方法中加锁以维护状态。此外，某些 [[SchedulerBackend]]
+ * 在想要发送事件时会在自身上同步，然后获取此类的锁，因此需要确保在持有自身锁时
+ * 不尝试锁定后端。此类从多个线程调用，包括：
+ *   * DAGScheduler 事件循环
+ *   * RPC 处理线程，响应来自 Executor 的状态更新
+ *   * CoarseGrainedSchedulerBackend 的周期性资源供给刷新（用于延迟调度）
+ *   * task-result-getter 线程
  *
- * CAUTION: Any non fatal exception thrown within Spark RPC framework can be swallowed.
- * Thus, throwing exception in methods like resourceOffers, statusUpdate won't fail
- * the application, but could lead to undefined behavior. Instead, we shall use method like
- * TaskSetManger.abort() to abort a stage and then fail the application (SPARK-31485).
+ * 注意：Spark RPC 框架中抛出的任何非致命异常都会被吞掉。
+ * 因此在 resourceOffers、statusUpdate 等方法中抛出异常不会使应用失败，
+ * 但可能导致未定义行为。应使用 TaskSetManager.abort() 来中止 Stage 然后使应用失败。
  *
- * Delay Scheduling:
- *  Delay scheduling is an optimization that sacrifices job fairness for data locality in order to
- *  improve cluster and workload throughput. One useful definition of "delay" is how much time
- *  has passed since the TaskSet was using its fair share of resources. Since it is impractical to
- *  calculate this delay without a full simulation, the heuristic used is the time since the
- *  TaskSetManager last launched a task and has not rejected any resources due to delay scheduling
- *  since it was last offered its "fair share". A "fair share" offer is when [[resourceOffers]]'s
- *  parameter "isAllFreeResources" is set to true. A "delay scheduling reject" is when a resource
- *  is not utilized despite there being pending tasks (implemented inside [[TaskSetManager]]).
- *  The legacy heuristic only measured the time since the [[TaskSetManager]] last launched a task,
- *  and can be re-enabled by setting spark.locality.wait.legacyResetOnTaskLaunch to true.
+ * 延迟调度：
+ *  延迟调度是一种以牺牲作业公平性来换取数据本地性的优化，以提高集群和工作负载吞吐量。
+ *  "延迟"的一个有用定义是自 TaskSet 使用其公平份额的资源以来经过了多长时间。
+ *  由于在没有完整模拟的情况下计算此延迟不切实际，使用的启发式方法是自
+ *  TaskSetManager 上次启动任务且自上次获得"公平份额"以来未因延迟调度拒绝任何资源的时间。
+ *  "公平份额"供给是指 [[resourceOffers]] 的 isAllFreeResources 参数设置为 true 时。
+ *  遗留的启发式方法仅测量自 [[TaskSetManager]] 上次启动任务以来的时间，
+ *  可通过设置 spark.locality.wait.legacyResetOnTaskLaunch 为 true 重新启用。
  */
 private[spark] class TaskSchedulerImpl(
     val sc: SparkContext,

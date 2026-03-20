@@ -22,7 +22,8 @@ import org.apache.spark.resource.ResourceProfile.DEFAULT_RESOURCE_PROFILE_ID
 
 /**
  * :: DeveloperApi ::
- * Stores information about an executor to pass from the scheduler to SparkListeners.
+ * 存储 Executor 的信息，用于从调度器传递给 SparkListener。
+ * 包含 Executor 的主机名、核心数、日志URL、属性、资源信息和资源配置ID等。
  */
 @DeveloperApi
 class ExecutorInfo(

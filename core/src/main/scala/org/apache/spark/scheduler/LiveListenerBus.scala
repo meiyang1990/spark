@@ -37,11 +37,11 @@ import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.metrics.source.Source
 
 /**
- * Asynchronously passes SparkListenerEvents to registered SparkListeners.
+ * 异步地将 SparkListenerEvent 传递给已注册的 SparkListener。
  *
- * Until `start()` is called, all posted events are only buffered. Only after this listener bus
- * has started will events be actually propagated to all attached listeners. This listener bus
- * is stopped when `stop()` is called, and it will drop further events after stopping.
+ * 在调用 `start()` 之前，所有投递的事件仅被缓冲。只有在此监听器总线启动后，
+ * 事件才会真正传播给所有附加的监听器。调用 `stop()` 时停止此监听器总线，
+ * 停止后将丢弃新投递的事件。
  */
 private[spark] class LiveListenerBus(conf: SparkConf) {
 

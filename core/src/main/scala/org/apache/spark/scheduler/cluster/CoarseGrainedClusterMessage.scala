@@ -25,12 +25,18 @@ import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.scheduler.{ExecutorLossReason, MiscellaneousProcessDetails}
 import org.apache.spark.util.SerializableBuffer
 
+/** 粗粒度集群通信消息的基础特质 */
 private[spark] sealed trait CoarseGrainedClusterMessage extends Serializable
 
+/**
+ * 粗粒度集群消息集合。定义了 Driver 与 Executor 之间通信的所有 RPC 消息类型。
+ */
 private[spark] object CoarseGrainedClusterMessages {
 
+  /** Executor 请求获取 Spark 应用配置 */
   case class RetrieveSparkAppConfig(resourceProfileId: Int) extends CoarseGrainedClusterMessage
 
+  /** Driver 返回的 Spark 应用配置 */
   case class SparkAppConfig(
       sparkProperties: Seq[(String, String)],
       ioEncryptionKey: Option[Array[Byte]],
@@ -39,28 +45,37 @@ private[spark] object CoarseGrainedClusterMessages {
       logLevel: Option[String])
     extends CoarseGrainedClusterMessage
 
+  /** 获取最后分配的 Executor ID */
   case object RetrieveLastAllocatedExecutorId extends CoarseGrainedClusterMessage
 
-  // Driver to executors
+  // Driver 发送给 Executor 的消息
+  /** 启动任务消息 */
   case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
 
+  /** 终止任务消息 */
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean, reason: String)
     extends CoarseGrainedClusterMessage
 
+  /** 杀死指定主机上所有 Executor 的消息 */
   case class KillExecutorsOnHost(host: String)
     extends CoarseGrainedClusterMessage
 
+  /** 更新所有 Executor 日志级别的消息 */
   case class UpdateExecutorsLogLevel(logLevel: String) extends CoarseGrainedClusterMessage
 
+  /** 更新单个 Executor 日志级别的消息 */
   case class UpdateExecutorLogLevel(logLevel: String) extends CoarseGrainedClusterMessage
 
+  /** 退役指定主机上所有 Executor 的消息 */
   case class DecommissionExecutorsOnHost(host: String)
     extends CoarseGrainedClusterMessage
 
+  /** 更新 Hadoop 委派令牌的消息 */
   case class UpdateDelegationTokens(tokens: Array[Byte])
     extends CoarseGrainedClusterMessage
 
-  // Executors to driver
+  // Executor 发送给 Driver 的消息
+  /** Executor 注册消息 */
   case class RegisterExecutor(
       executorId: String,
       executorRef: RpcEndpointRef,

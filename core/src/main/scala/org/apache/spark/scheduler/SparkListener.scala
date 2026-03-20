@@ -29,20 +29,25 @@ import org.apache.spark.resource.ResourceProfile
 import org.apache.spark.scheduler.cluster.ExecutorInfo
 import org.apache.spark.storage.{BlockManagerId, BlockUpdatedInfo}
 
+/** Stage 提交事件 */
 @DeveloperApi
 case class SparkListenerStageSubmitted(stageInfo: StageInfo, properties: Properties = null)
   extends SparkListenerEvent
 
+/** Stage 完成事件 */
 @DeveloperApi
 case class SparkListenerStageCompleted(stageInfo: StageInfo) extends SparkListenerEvent
 
+/** 任务开始事件 */
 @DeveloperApi
 case class SparkListenerTaskStart(stageId: Int, stageAttemptId: Int, taskInfo: TaskInfo)
   extends SparkListenerEvent
 
+/** 任务正在获取结果事件 */
 @DeveloperApi
 case class SparkListenerTaskGettingResult(taskInfo: TaskInfo) extends SparkListenerEvent
 
+/** 推测执行任务提交事件 */
 @DeveloperApi
 case class SparkListenerSpeculativeTaskSubmitted(
     stageId: Int,
@@ -63,6 +68,7 @@ case class SparkListenerSpeculativeTaskSubmitted(
   }
 }
 
+/** 任务结束事件 */
 @DeveloperApi
 case class SparkListenerTaskEnd(
     stageId: Int,
@@ -71,10 +77,11 @@ case class SparkListenerTaskEnd(
     reason: TaskEndReason,
     taskInfo: TaskInfo,
     taskExecutorMetrics: ExecutorMetrics,
-    // may be null if the task has failed
+    // 任务失败时 taskMetrics 可能为 null
     @Nullable taskMetrics: TaskMetrics)
   extends SparkListenerEvent
 
+/** 作业开始事件 */
 @DeveloperApi
 case class SparkListenerJobStart(
     jobId: Int,
@@ -82,11 +89,11 @@ case class SparkListenerJobStart(
     stageInfos: Seq[StageInfo],
     properties: Properties = null)
   extends SparkListenerEvent {
-  // Note: this is here for backwards-compatibility with older versions of this event which
-  // only stored stageIds and not StageInfos:
+  // 注意：为了向后兼容，保留了只存储 stageIds 而非 StageInfos 的旧版本字段
   val stageIds: Seq[Int] = stageInfos.map(_.stageId)
 }
 
+/** 作业结束事件 */
 @DeveloperApi
 case class SparkListenerJobEnd(
     jobId: Int,
@@ -94,11 +101,13 @@ case class SparkListenerJobEnd(
     jobResult: JobResult)
   extends SparkListenerEvent
 
+/** 环境变量更新事件 */
 @DeveloperApi
 case class SparkListenerEnvironmentUpdate(
     environmentDetails: Map[String, collection.Seq[(String, String)]])
   extends SparkListenerEvent
 
+/** BlockManager 添加事件 */
 @DeveloperApi
 case class SparkListenerBlockManagerAdded(
     time: Long,
@@ -108,21 +117,26 @@ case class SparkListenerBlockManagerAdded(
     maxOffHeapMem: Option[Long] = None) extends SparkListenerEvent {
 }
 
+/** BlockManager 移除事件 */
 @DeveloperApi
 case class SparkListenerBlockManagerRemoved(time: Long, blockManagerId: BlockManagerId)
   extends SparkListenerEvent
 
+/** RDD 取消持久化事件 */
 @DeveloperApi
 case class SparkListenerUnpersistRDD(rddId: Int) extends SparkListenerEvent
 
+/** Executor 添加事件 */
 @DeveloperApi
 case class SparkListenerExecutorAdded(time: Long, executorId: String, executorInfo: ExecutorInfo)
   extends SparkListenerEvent
 
+/** Executor 移除事件 */
 @DeveloperApi
 case class SparkListenerExecutorRemoved(time: Long, executorId: String, reason: String)
   extends SparkListenerEvent
 
+/** Executor 被加入黑名单事件（已弃用，使用 SparkListenerExecutorExcluded 代替） */
 @DeveloperApi
 @deprecated("use SparkListenerExecutorExcluded instead", "3.1.0")
 case class SparkListenerExecutorBlacklisted(
@@ -131,6 +145,7 @@ case class SparkListenerExecutorBlacklisted(
     taskFailures: Int)
   extends SparkListenerEvent
 
+/** Executor 被排除事件 */
 @DeveloperApi
 @Since("3.1.0")
 case class SparkListenerExecutorExcluded(
@@ -296,104 +311,68 @@ case class SparkListenerResourceProfileAdded(resourceProfile: ResourceProfile)
   extends SparkListenerEvent
 
 /**
- * Interface for listening to events from the Spark scheduler. Most applications should probably
- * extend SparkListener or SparkFirehoseListener directly, rather than implementing this class.
+ * 监听 Spark 调度器事件的接口。大多数应用应直接继承 SparkListener 或 SparkFirehoseListener，
+ * 而不是实现此接口。
  *
- * Note that this is an internal interface which might change in different Spark releases.
+ * 注意：这是一个内部接口，可能在不同的 Spark 版本中发生变化。
  */
 private[spark] trait SparkListenerInterface {
 
-  /**
-   * Called when a stage completes successfully or fails, with information on the completed stage.
-   */
+  /** 当 Stage 完成（成功或失败）时调用 */
   def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit
 
-  /**
-   * Called when a stage is submitted
-   */
+  /** 当 Stage 被提交时调用 */
   def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit
 
-  /**
-   * Called when a task starts
-   */
+  /** 当任务开始时调用 */
   def onTaskStart(taskStart: SparkListenerTaskStart): Unit
 
-  /**
-   * Called when a task begins remotely fetching its result (will not be called for tasks that do
-   * not need to fetch the result remotely).
-   */
+  /** 当任务开始远程获取结果时调用（不需要远程获取结果的任务不会触发） */
   def onTaskGettingResult(taskGettingResult: SparkListenerTaskGettingResult): Unit
 
-  /**
-   * Called when a task ends
-   */
+  /** 当任务结束时调用 */
   def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit
 
-  /**
-   * Called when a job starts
-   */
+  /** 当作业开始时调用 */
   def onJobStart(jobStart: SparkListenerJobStart): Unit
 
-  /**
-   * Called when a job ends
-   */
+  /** 当作业结束时调用 */
   def onJobEnd(jobEnd: SparkListenerJobEnd): Unit
 
-  /**
-   * Called when environment properties have been updated
-   */
+  /** 当环境属性更新时调用 */
   def onEnvironmentUpdate(environmentUpdate: SparkListenerEnvironmentUpdate): Unit
 
-  /**
-   * Called when a new block manager has joined
-   */
+  /** 当新的 BlockManager 加入时调用 */
   def onBlockManagerAdded(blockManagerAdded: SparkListenerBlockManagerAdded): Unit
 
-  /**
-   * Called when an existing block manager has been removed
-   */
+  /** 当已有的 BlockManager 被移除时调用 */
   def onBlockManagerRemoved(blockManagerRemoved: SparkListenerBlockManagerRemoved): Unit
 
-  /**
-   * Called when an RDD is manually unpersisted by the application
-   */
+  /** 当应用手动取消 RDD 持久化时调用 */
   def onUnpersistRDD(unpersistRDD: SparkListenerUnpersistRDD): Unit
 
-  /**
-   * Called when the application starts
-   */
+  /** 当应用启动时调用 */
   def onApplicationStart(applicationStart: SparkListenerApplicationStart): Unit
 
-  /**
-   * Called when the application ends
-   */
+  /** 当应用结束时调用 */
   def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit
 
-  /**
-   * Called when the driver receives task metrics from an executor in a heartbeat.
-   */
+  /** 当 Driver 在心跳中接收到 Executor 的任务指标时调用 */
   def onExecutorMetricsUpdate(executorMetricsUpdate: SparkListenerExecutorMetricsUpdate): Unit
 
   /**
-   * Called with the peak memory metrics for a given (executor, stage) combination. Note that this
-   * is only present when reading from the event log (as in the history server), and is never
-   * called in a live application.
+   * 当指定 (Executor, Stage) 组合的峰值内存指标可用时调用。
+   * 注意：仅在从事件日志读取时存在（如历史服务器中），在运行中的应用中不会被调用。
    */
   def onStageExecutorMetrics(executorMetrics: SparkListenerStageExecutorMetrics): Unit
 
-  /**
-   * Called when the driver registers a new executor.
-   */
+  /** 当 Driver 注册新的 Executor 时调用 */
   def onExecutorAdded(executorAdded: SparkListenerExecutorAdded): Unit
 
-  /**
-   * Called when the driver removes an executor.
-   */
+  /** 当 Driver 移除 Executor 时调用 */
   def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit
 
-  /**
-   * Called when the driver excludes an executor for a Spark application.
-   */
+  /** 当 Driver 在应用级别排除 Executor 时调用（已弃用） */
   @deprecated("use onExecutorExcluded instead", "3.1.0")
   def onExecutorBlacklisted(executorBlacklisted: SparkListenerExecutorBlacklisted): Unit
 
@@ -497,10 +476,10 @@ private[spark] trait SparkListenerInterface {
 
 /**
  * :: DeveloperApi ::
- * A default implementation for `SparkListenerInterface` that has no-op implementations for
- * all callbacks.
+ * SparkListenerInterface 的默认实现，所有回调方法均为空操作。
+ * 用户可以继承此类并只重写感兴趣的方法。
  *
- * Note that this is an internal interface which might change in different Spark releases.
+ * 注意：这是一个内部接口，可能在不同的 Spark 版本中发生变化。
  */
 @DeveloperApi
 abstract class SparkListener extends SparkListenerInterface {
