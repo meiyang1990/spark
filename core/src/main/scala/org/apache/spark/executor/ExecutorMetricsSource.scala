@@ -33,27 +33,51 @@ import org.apache.spark.metrics.source.Source
  * (2) Procfs metrics are gathered all in one-go and only conditionally:
  * if the /proc filesystem exists
  * and spark.executor.processTreeMetrics.enabled=true.
+ *
+ * Executor 指标数据源，通过 Dropwizard Metrics 系统暴露 ExecutorMetricType 定义的指标。
+ *
+ * 【性能优化】
+ * 由于内存相关指标的采集开销较大，本类实现了以下优化：
+ * 1. 指标缓存：指标值被缓存在 metricsSnapshot 中，由 ExecutorMetricsPoller 定期更新
+ *    - 默认通过心跳更新（间隔约 10 秒）
+ *    - 可配置 spark.executor.metrics.pollingInterval 启用更高频的独立轮询
+ * 2. Procfs 批量采集：/proc 文件系统指标一次性批量读取
+ *    - 仅在 Linux 系统且 spark.executor.processTreeMetrics.enabled=true 时启用
+ *
+ * 【与其他组件的关系】
+ * - ExecutorMetricsPoller：负责定期调用 updateMetricsSnapshot() 更新缓存
+ * - MetricsSystem：本类注册到 MetricsSystem 后，Gauge 指标被暴露给外部监控系统
  */
 private[spark] class ExecutorMetricsSource extends Source {
 
   override val metricRegistry = new MetricRegistry()
   override val sourceName = "ExecutorMetrics"
+
+  // 指标快照缓存，由 ExecutorMetricsPoller 定期更新
+  // 使用 @volatile 保证多线程可见性
   @volatile var metricsSnapshot: Array[Long] = Array.fill(ExecutorMetricType.numMetrics)(0L)
 
-  // called by ExecutorMetricsPoller
+  // 由 ExecutorMetricsPoller 调用以更新指标快照
   def updateMetricsSnapshot(metricsUpdates: Array[Long]): Unit = {
     metricsSnapshot = metricsUpdates
   }
 
+  // Gauge 实现：从快照数组中读取对应索引的值
   private class ExecutorMetricGauge(idx: Int) extends Gauge[Long] {
     def getValue: Long = metricsSnapshot(idx)
   }
 
+  /**
+   * 注册所有指标到 MetricsSystem。
+   * 为每种指标类型创建一个 Gauge，Gauge 读取时从 metricsSnapshot 获取最新值。
+   */
   def register(metricsSystem: MetricsSystem): Unit = {
+    // 为每个指标索引创建 Gauge
     val gauges: IndexedSeq[ExecutorMetricGauge] = (0 until ExecutorMetricType.numMetrics).map {
       idx => new ExecutorMetricGauge(idx)
     }
 
+    // 按名称注册所有 Gauge
     ExecutorMetricType.metricToOffset.foreach {
       case (name, idx) =>
         metricRegistry.register(MetricRegistry.name(name), gauges(idx))

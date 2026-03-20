@@ -20,5 +20,12 @@ package org.apache.spark
 /**
  * Executor components used with various cluster managers.
  * See [[org.apache.spark.executor.Executor]].
+ *
+ * Executor 相关组件包，与各种集群管理器（如 YARN、Kubernetes、Standalone）配合使用。
+ * Executor 是 Spark 在 Worker 节点上执行任务的进程，负责：
+ * - 运行应用程序的 Task
+ * - 将数据缓存到内存或磁盘
+ * - 向 Driver 汇报任务执行状态和指标
+ * 详见 [[org.apache.spark.executor.Executor]]
  */
 package object executor

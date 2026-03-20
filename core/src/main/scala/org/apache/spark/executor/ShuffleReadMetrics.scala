@@ -26,25 +26,64 @@ import org.apache.spark.util.LongAccumulator
  * :: DeveloperApi ::
  * A collection of accumulators that represent metrics about reading shuffle data.
  * Operations are not thread-safe.
+ *
+ * Shuffle 读取指标类，用于收集和汇报 Task 在 Shuffle Read 阶段的各项性能数据。
+ *
+ * 在 Spark 的 Shuffle 过程中，Map 端将数据按 Partition 写出（Shuffle Write），
+ * 而 Reduce 端需要从各个 Map 输出中拉取属于自己分区的数据（Shuffle Read）。
+ * 本类记录的指标包括：
+ * - 拉取的数据块数量（本地/远程）
+ * - 拉取的字节数（本地/远程）
+ * - 等待拉取的时间
+ * - 读取的记录数
+ * - Push-based Shuffle 相关的合并块指标
+ *
+ * 这些指标通过 Accumulator 机制收集，在 Task 完成或 Executor 心跳时汇报给 Driver，
+ * 用于 Spark UI 展示和性能调优分析。
+ *
+ * 注意：本类的操作非线程安全，每个 Task 独立持有自己的实例。
  */
 @DeveloperApi
 class ShuffleReadMetrics private[spark] () extends Serializable {
+  // ==================== 基础 Shuffle Read 指标 ====================
+  // 记录从远程 Executor 拉取的数据块数量
   private[executor] val _remoteBlocksFetched = new LongAccumulator
+  // 记录从本地（同一 Executor）读取的数据块数量
   private[executor] val _localBlocksFetched = new LongAccumulator
+  // 记录从远程读取的总字节数
   private[executor] val _remoteBytesRead = new LongAccumulator
+  // 记录远程数据落盘的字节数（当内存不足时，拉取的数据会先写入磁盘）
   private[executor] val _remoteBytesReadToDisk = new LongAccumulator
+  // 记录从本地磁盘读取的字节数
   private[executor] val _localBytesRead = new LongAccumulator
+  // 记录等待拉取数据的阻塞时间（毫秒），是网络延迟的重要指标
   private[executor] val _fetchWaitTime = new LongAccumulator
+  // 记录读取的总记录数
   private[executor] val _recordsRead = new LongAccumulator
+
+  // ==================== Push-based Shuffle 相关指标 ====================
+  // 以下指标用于 Spark 3.2+ 引入的 Push-based Shuffle 优化
+  // 该优化允许 Map 端主动将数据推送到远程节点进行预合并，减少 Reduce 端的拉取开销
+
+  // 遇到的损坏合并块分片数量
   private[executor] val _corruptMergedBlockChunks = new LongAccumulator
+  // 合并块读取失败后回退到原始块的次数
   private[executor] val _mergedFetchFallbackCount = new LongAccumulator
+  // 从远程拉取的合并块数量
   private[executor] val _remoteMergedBlocksFetched = new LongAccumulator
+  // 从本地读取的合并块数量
   private[executor] val _localMergedBlocksFetched = new LongAccumulator
+  // 从远程拉取的合并块分片数量
   private[executor] val _remoteMergedChunksFetched = new LongAccumulator
+  // 从本地读取的合并块分片数量
   private[executor] val _localMergedChunksFetched = new LongAccumulator
+  // 从远程读取的合并块总字节数
   private[executor] val _remoteMergedBytesRead = new LongAccumulator
+  // 从本地读取的合并块总字节数
   private[executor] val _localMergedBytesRead = new LongAccumulator
+  // 远程普通请求的总耗时
   private[executor] val _remoteReqsDuration = new LongAccumulator
+  // 远程合并块请求的总耗时
   private[executor] val _remoteMergedReqsDuration = new LongAccumulator
 
   /**
@@ -196,6 +235,10 @@ class ShuffleReadMetrics private[spark] () extends Serializable {
   /**
    * Resets the value of the current metrics (`this`) and merges all the independent
    * [[TempShuffleReadMetrics]] into `this`.
+   *
+   * 重置当前指标并合并所有临时指标。
+   * 一个 Task 可能有多个 Shuffle 依赖，每个依赖使用独立的 TempShuffleReadMetrics 收集数据，
+   * 在 Task 完成或心跳汇报时，调用此方法将所有临时指标合并到最终的 ShuffleReadMetrics 中。
    */
   private[spark] def setMergeValues(metrics: Seq[TempShuffleReadMetrics]): Unit = {
     _remoteBlocksFetched.setValue(0)
@@ -242,6 +285,20 @@ class ShuffleReadMetrics private[spark] () extends Serializable {
  * A temporary shuffle read metrics holder that is used to collect shuffle read metrics for each
  * shuffle dependency, and all temporary metrics will be merged into the [[ShuffleReadMetrics]] at
  * last.
+ *
+ * 临时 Shuffle Read 指标收集器。
+ *
+ * 设计背景：
+ * 一个 Task 可能依赖多个 Shuffle（即有多个 ShuffleDependency），每个 Shuffle 依赖
+ * 都有独立的 ShuffleReader。为了避免多个 Reader 在不同线程中并发更新同一个
+ * ShuffleReadMetrics 导致的线程安全问题，Spark 采用了"先分后合"的策略：
+ *
+ * 1. 每个 ShuffleReader 持有一个独立的 TempShuffleReadMetrics 实例
+ * 2. Reader 在读取过程中更新自己的临时指标（无需同步）
+ * 3. Task 完成时，调用 TaskMetrics.mergeShuffleReadMetrics() 将所有临时指标
+ *    合并到最终的 ShuffleReadMetrics 中
+ *
+ * 本类实现 ShuffleReadMetricsReporter 接口，供 ShuffleReader 调用增量方法更新指标。
  */
 private[spark] class TempShuffleReadMetrics extends ShuffleReadMetricsReporter {
   private[this] var _remoteBlocksFetched = 0L

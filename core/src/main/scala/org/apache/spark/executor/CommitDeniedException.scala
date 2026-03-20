@@ -21,6 +21,15 @@ import org.apache.spark.TaskCommitDenied
 
 /**
  * Exception thrown when a task attempts to commit output to HDFS but is denied by the driver.
+ *
+ * 当任务尝试将输出提交到 HDFS 但被 Driver 拒绝时抛出此异常。
+ * 这种情况通常发生在推测执行场景中：多个相同任务的尝试同时运行，
+ * 只有一个尝试被允许提交结果，其他尝试将收到拒绝并抛出此异常。
+ *
+ * @param msg 异常消息
+ * @param jobID 所属作业的ID
+ * @param splitID 分区/分片ID
+ * @param attemptNumber 任务尝试次数编号
  */
 private[spark] class CommitDeniedException(
     msg: String,
@@ -29,5 +38,6 @@ private[spark] class CommitDeniedException(
     attemptNumber: Int)
   extends Exception(msg) {
 
+  // 将异常转换为 TaskCommitDenied 任务失败原因对象，用于向 Driver 汇报
   def toTaskCommitDeniedReason: TaskCommitDenied = TaskCommitDenied(jobID, splitID, attemptNumber)
 }

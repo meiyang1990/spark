@@ -25,10 +25,15 @@ import org.apache.spark.util.LongAccumulator
  * :: DeveloperApi ::
  * Method by which output data was written.
  * Operations are not thread-safe.
+ *
+ * 数据写入方式枚举。定义数据写入外部系统的方式。
+ * 当前只支持 Hadoop（HDFS 等）文件系统的写入方式。
+ * 注意：操作非线程安全
  */
 @DeveloperApi
 object DataWriteMethod extends Enumeration with Serializable {
   type DataWriteMethod = Value
+  // Hadoop 文件系统写入
   val Hadoop = Value
 }
 
@@ -36,22 +41,32 @@ object DataWriteMethod extends Enumeration with Serializable {
 /**
  * :: DeveloperApi ::
  * A collection of accumulators that represents metrics about writing data to external systems.
+ *
+ * 输出指标类，用于收集将数据写入外部系统的相关指标。
+ * 这些指标通过累加器收集，最终在 Spark UI 中展示，
+ * 帮助用户了解作业的数据输出量和写入性能。
  */
 @DeveloperApi
 class OutputMetrics private[spark] () extends Serializable {
+  // 写入的字节数累加器
   private[executor] val _bytesWritten = new LongAccumulator
+  // 写入的记录数累加器
   private[executor] val _recordsWritten = new LongAccumulator
 
   /**
    * Total number of bytes written.
+   * 返回写入的总字节数
    */
   def bytesWritten: Long = _bytesWritten.sum
 
   /**
    * Total number of records written.
+   * 返回写入的总记录数
    */
   def recordsWritten: Long = _recordsWritten.sum
 
+  // 设置写入字节数（覆盖原值）
   private[spark] def setBytesWritten(v: Long): Unit = _bytesWritten.setValue(v)
+  // 设置写入记录数（覆盖原值）
   private[spark] def setRecordsWritten(v: Long): Unit = _recordsWritten.setValue(v)
 }
