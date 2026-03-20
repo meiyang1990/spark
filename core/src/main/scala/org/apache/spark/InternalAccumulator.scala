@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,11 +19,10 @@
 package org.apache.spark
 
 /**
- * A collection of fields and methods concerned with internal accumulators that represent
- * task level metrics.
+ * 内部累加器的字段和方法集合，用于表示任务级别的指标。
  */
 private[spark] object InternalAccumulator {
-  // Prefixes used in names of internal task level metrics
+  // 内部任务级别指标名称的前缀
   val METRICS_PREFIX = "internal.metrics."
   val SHUFFLE_READ_METRICS_PREFIX = METRICS_PREFIX + "shuffle.read."
   val SHUFFLE_WRITE_METRICS_PREFIX = METRICS_PREFIX + "shuffle.write."
@@ -30,7 +30,7 @@ private[spark] object InternalAccumulator {
   val INPUT_METRICS_PREFIX = METRICS_PREFIX + "input."
   val SHUFFLE_PUSH_READ_METRICS_PREFIX = METRICS_PREFIX + "shuffle.push.read."
 
-  // Names of internal task level metrics
+  // 内部任务级别指标名称
   val EXECUTOR_DESERIALIZE_TIME = METRICS_PREFIX + "executorDeserializeTime"
   val EXECUTOR_DESERIALIZE_CPU_TIME = METRICS_PREFIX + "executorDeserializeCpuTime"
   val EXECUTOR_RUN_TIME = METRICS_PREFIX + "executorRunTime"
@@ -48,7 +48,7 @@ private[spark] object InternalAccumulator {
 
   // scalastyle:off
 
-  // Names of shuffle read metrics
+  // Shuffle 读取指标名称
   object shuffleRead {
     val REMOTE_BLOCKS_FETCHED = SHUFFLE_READ_METRICS_PREFIX + "remoteBlocksFetched"
     val LOCAL_BLOCKS_FETCHED = SHUFFLE_READ_METRICS_PREFIX + "localBlocksFetched"
@@ -76,13 +76,13 @@ private[spark] object InternalAccumulator {
     val WRITE_TIME = SHUFFLE_WRITE_METRICS_PREFIX + "writeTime"
   }
 
-  // Names of output metrics
+  // 输出指标名称
   object output {
     val BYTES_WRITTEN = OUTPUT_METRICS_PREFIX + "bytesWritten"
     val RECORDS_WRITTEN = OUTPUT_METRICS_PREFIX + "recordsWritten"
   }
 
-  // Names of input metrics
+  // 输入指标名称
   object input {
     val BYTES_READ = INPUT_METRICS_PREFIX + "bytesRead"
     val RECORDS_READ = INPUT_METRICS_PREFIX + "recordsRead"

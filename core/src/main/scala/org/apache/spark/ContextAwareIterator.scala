@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -33,6 +34,7 @@ import org.apache.spark.annotation.DeveloperApi
 class ContextAwareIterator[+T](val context: TaskContext, val delegate: Iterator[T])
   extends Iterator[T] {
 
+  // 只有在任务未完成且未中断时才继续迭代，防止任务结束后继续消费数据
   override def hasNext: Boolean =
     !context.isCompleted() && !context.isInterrupted() && delegate.hasNext
 

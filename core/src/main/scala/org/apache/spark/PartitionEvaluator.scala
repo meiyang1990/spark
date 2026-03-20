@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -28,8 +29,8 @@ import org.apache.spark.annotation.{DeveloperApi, Since}
 trait PartitionEvaluator[T, U] {
 
   /**
-   * Evaluates the RDD partition at the given index. There can be more than one input iterator,
-   * if the RDD was zipped from multiple RDDs.
+   * 计算给定索引处的 RDD 分区。
+   * 如果 RDD 是由多个 RDD zip 而成，则可能有多个输入迭代器。
    */
   def eval(partitionIndex: Int, inputs: Iterator[T]*): Iterator[U]
 }

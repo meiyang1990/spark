@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -35,10 +36,10 @@ import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util._
 
 /**
- * A heartbeat from executors to the driver. This is a shared message used by several internal
- * components to convey liveness or execution information for in-progress tasks. It will also
- * expire the hosts that have not heartbeated for more than spark.network.timeout.
- * spark.executor.heartbeatInterval should be significantly less than spark.network.timeout.
+ * Executor 向 Driver 发送的心跳消息。
+ * 该消息被多个内部组件共享，用于传达活跃度或正在运行任务的执行信息。
+ * 同时会清除超过 spark.network.timeout 未发送心跳的主机。
+ * spark.executor.heartbeatInterval 应显著小于 spark.network.timeout。
  */
 private[spark] case class Heartbeat(
     executorId: String,
@@ -49,8 +50,7 @@ private[spark] case class Heartbeat(
     executorUpdates: Map[(Int, Int), ExecutorMetrics])
 
 /**
- * An event that SparkContext uses to notify HeartbeatReceiver that SparkContext.taskScheduler is
- * created.
+ * SparkContext 用来通知 HeartbeatReceiver：SparkContext.taskScheduler 已创建的事件。
  */
 private[spark] case object TaskSchedulerIsSet
 
@@ -63,7 +63,7 @@ private case class ExecutorRemoved(executorId: String)
 private[spark] case class HeartbeatResponse(reregisterBlockManager: Boolean)
 
 /**
- * Lives in the driver to receive heartbeats from executors..
+ * 位于 Driver 端，接收来自 Executor 的心跳。
  */
 private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
   extends SparkListener with IsolatedThreadSafeRpcEndpoint with Logging {
@@ -104,8 +104,7 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
 
   private var timeoutCheckingTask: ScheduledFuture[_] = null
 
-  // "eventLoopThread" is used to run some pretty fast actions. The actions running in it should not
-  // block the thread for a long time.
+  // "eventLoopThread" 用于执行一些快速操作。在其中运行的操作不应长时间阻塞线程。
   private val eventLoopThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("heartbeat-receiver-event-loop-thread")
 
@@ -164,41 +163,34 @@ private[spark] class HeartbeatReceiver(sc: SparkContext, clock: Clock)
   }
 
   /**
-   * Send ExecutorRegistered to the event loop to add a new executor. Only for test.
+   * 发送 ExecutorRegistered 到事件循环以注册新 Executor。仅用于测试。
    *
-   * @return if HeartbeatReceiver is stopped, return None. Otherwise, return a Some(Future) that
-   *         indicate if this operation is successful.
+   * @return 如果 HeartbeatReceiver 已停止则返回 None。否则返回一个 Future 表示操作是否成功。
    */
   def addExecutor(executorId: String): Option[Future[Boolean]] = {
     Option(self).map(_.ask[Boolean](ExecutorRegistered(executorId)))
   }
 
-  /**
-   * If the heartbeat receiver is not stopped, notify it of executor registrations.
-   */
+  /** 如果心跳接收器未停止，则通知它 Executor 已注册 */
   override def onExecutorAdded(executorAdded: SparkListenerExecutorAdded): Unit = {
     addExecutor(executorAdded.executorId)
   }
 
   /**
-   * Send ExecutorRemoved to the event loop to remove an executor. Only for test.
+   * 发送 ExecutorRemoved 到事件循环以移除 Executor。仅用于测试。
    *
-   * @return if HeartbeatReceiver is stopped, return None. Otherwise, return a Some(Future) that
-   *         indicate if this operation is successful.
+   * @return 如果 HeartbeatReceiver 已停止则返回 None。否则返回一个 Future 表示操作是否成功。
    */
   def removeExecutor(executorId: String): Option[Future[Boolean]] = {
     Option(self).map(_.ask[Boolean](ExecutorRemoved(executorId)))
   }
 
   /**
-   * If the heartbeat receiver is not stopped, notify it of executor removals so it doesn't
-   * log superfluous errors.
+   * 如果心跳接收器未停止，通知它 Executor 已被移除以避免多余的错误日志。
    *
-   * Note that we must do this after the executor is actually removed to guard against the
-   * following race condition: if we remove an executor's metadata from our data structure
-   * prematurely, we may get an in-flight heartbeat from the executor before the executor is
-   * actually removed, in which case we will still mark the executor as a dead host later
-   * and expire it with loud error messages.
+   * 注意：必须在 Executor 实际移除之后才能执行此操作，以避免以下竞态条件：
+   * 如果过早地从数据结构中移除 Executor 的元数据，在 Executor 实际移除之前
+   * 可能收到飞行中的心跳，这会导致后续仍将 Executor 标记为死主机并输出大量错误日志。
    */
   override def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit = {
     removeExecutor(executorRemoved.executorId)

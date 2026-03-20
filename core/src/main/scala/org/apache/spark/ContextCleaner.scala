@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -106,12 +107,12 @@ private[spark] class ContextCleaner(
 
   @volatile private var stopped = false
 
-  /** Attach a listener object to get information of when objects are cleaned. */
+  /** 添加监听器以获取对象清理时的信息 */
   def attachListener(listener: CleanerListener): Unit = {
     listeners.add(listener)
   }
 
-  /** Start the cleaner. */
+  /** 启动清理器 */
   def start(): Unit = {
     cleaningThread.setDaemon(true)
     cleaningThread.setName("Spark Context Cleaner")
@@ -138,7 +139,7 @@ private[spark] class ContextCleaner(
     periodicGCService.shutdown()
   }
 
-  /** Register an RDD for cleanup when it is garbage collected. */
+  /** 注册 RDD 以便在垃圾回收时清理 */
   def registerRDDForCleanup(rdd: RDD[_]): Unit = {
     registerForCleanup(rdd, CleanRDD(rdd.id))
   }
@@ -147,34 +148,34 @@ private[spark] class ContextCleaner(
     registerForCleanup(a, CleanAccum(a.id))
   }
 
-  /** Register a ShuffleDependency for cleanup when it is garbage collected. */
+  /** 注册 ShuffleDependency 以便在垃圾回收时清理 */
   def registerShuffleForCleanup(shuffleDependency: ShuffleDependency[_, _, _]): Unit = {
     registerForCleanup(shuffleDependency, CleanShuffle(shuffleDependency.shuffleId))
   }
 
-  /** Register a Broadcast for cleanup when it is garbage collected. */
+  /** 注册 Broadcast 以便在垃圾回收时清理 */
   def registerBroadcastForCleanup[T](broadcast: Broadcast[T]): Unit = {
     registerForCleanup(broadcast, CleanBroadcast(broadcast.id))
   }
 
-  /** Register a RDDCheckpointData for cleanup when it is garbage collected. */
+  /** 注册 RDDCheckpointData 以便在垃圾回收时清理 */
   def registerRDDCheckpointDataForCleanup[T](rdd: RDD[_], parentId: Int): Unit = {
     registerForCleanup(rdd, CleanCheckpoint(parentId))
   }
 
-  /** Register a SparkListener to be cleaned up when its owner is garbage collected. */
+  /** 注册 SparkListener 以便在其所有者被垃圾回收时清理 */
   def registerSparkListenerForCleanup(
       listenerOwner: AnyRef,
       listener: SparkListener): Unit = {
     registerForCleanup(listenerOwner, CleanSparkListener(listener))
   }
 
-  /** Register an object for cleanup. */
+  /** 注册对象以便清理 */
   private def registerForCleanup(objectForCleanup: AnyRef, task: CleanupTask): Unit = {
     referenceBuffer.add(new CleanupTaskWeakReference(task, objectForCleanup, referenceQueue))
   }
 
-  /** Keep cleaning RDD, shuffle, and broadcast state. */
+  /** 持续清理 RDD、Shuffle 和 Broadcast 状态 */
   private def keepCleaning(): Unit = Utils.tryOrStopSparkContext(sc) {
     while (!stopped) {
       try {
@@ -208,7 +209,7 @@ private[spark] class ContextCleaner(
     }
   }
 
-  /** Perform RDD cleanup. */
+  /** 执行 RDD 清理 */
   def doCleanupRDD(rddId: Int, blocking: Boolean): Unit = {
     try {
       logDebug("Cleaning RDD " + rddId)
@@ -220,7 +221,7 @@ private[spark] class ContextCleaner(
     }
   }
 
-  /** Perform shuffle cleanup. */
+  /** 执行 Shuffle 清理 */
   def doCleanupShuffle(shuffleId: Int, blocking: Boolean): Unit = {
     try {
       if (mapOutputTrackerMaster.containsShuffle(shuffleId)) {
@@ -252,7 +253,7 @@ private[spark] class ContextCleaner(
     }
   }
 
-  /** Perform accumulator cleanup. */
+  /** 执行累加器清理 */
   def doCleanupAccum(accId: Long, blocking: Boolean): Unit = {
     try {
       logDebug("Cleaning accumulator " + accId)
@@ -302,7 +303,7 @@ private object ContextCleaner {
 }
 
 /**
- * Listener class used when any item has been cleaned by the Cleaner class.
+ * Cleaner 清理任何项目时使用的监听器接口。
  */
 private[spark] trait CleanerListener {
   def rddCleaned(rddId: Int): Unit

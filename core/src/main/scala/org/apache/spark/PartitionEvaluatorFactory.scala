@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,8 +32,8 @@ import org.apache.spark.annotation.{DeveloperApi, Since}
 trait PartitionEvaluatorFactory[T, U] extends Serializable {
 
   /**
-   * Creates a partition evaluator. Each RDD partition will create one evaluator instance, which
-   * means one evaluator instance will be used by only one thread.
+   * 创建分区计算器。每个 RDD 分区会创建一个计算器实例，
+   * 即一个计算器实例只会由单个线程使用。
    */
   def createEvaluator(): PartitionEvaluator[T, U]
 }
