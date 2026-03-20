@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,8 +19,8 @@
 package org.apache.spark
 
 /**
- * Spark's broadcast variables, used to broadcast immutable datasets to all nodes.
+ * Spark 的广播变量包，提供将不可变数据集广播到所有节点的功能。
  */
 package object broadcast {
-  // For package docs only
+  // 仅用于包级文档
 }

@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -36,49 +37,42 @@ import org.apache.spark.util.{KeyLock, Utils}
 import org.apache.spark.util.io.{ChunkedByteBuffer, ChunkedByteBufferOutputStream}
 
 /**
- * A BitTorrent-like implementation of [[org.apache.spark.broadcast.Broadcast]].
+ * BitTorrent 风格的广播实现。机制如下：
  *
- * The mechanism is as follows:
+ * Driver 将序列化对象分割成小块，将这些块存储在 driver 的 BlockManager 中。
  *
- * The driver divides the serialized object into small chunks and
- * stores those chunks in the BlockManager of the driver.
+ * 在每个 executor 上，executor 首先尝试从其 BlockManager 获取对象。如果不存在，
+ * 则使用远程获取从 driver 和/或其他 executor（如果可用）获取小块。
+ * 获得块后，将块放入自己的 BlockManager，以供其他 executor 获取。
  *
- * On each executor, the executor first attempts to fetch the object from its BlockManager. If
- * it does not exist, it then uses remote fetches to fetch the small chunks from the driver and/or
- * other executors if available. Once it gets the chunks, it puts the chunks in its own
- * BlockManager, ready for other executors to fetch from.
+ * 这样可防止 driver 成为发送多个广播数据副本时的瓶颈（每个 executor 一份）。
  *
- * This prevents the driver from being the bottleneck in sending out multiple copies of the
- * broadcast data (one per executor).
+ * 初始化时，TorrentBroadcast 读取 SparkEnv.get.conf。
  *
- * When initialized, TorrentBroadcast objects read SparkEnv.get.conf.
- *
- * @param obj object to broadcast
- * @param id A unique identifier for the broadcast variable.
- * @param serializedOnly if true, do not cache the unserialized value on the driver
+ * @param obj 要广播的对象
+ * @param id 广播变量的唯一标识符
+ * @param serializedOnly 如果为 true，不在 driver 缓存未序列化值
  */
 private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long, serializedOnly: Boolean)
   extends Broadcast[T](id) with Logging with Serializable {
 
   /**
-   * Value of the broadcast object on executors. This is reconstructed by [[readBroadcastBlock]],
-   * which builds this value by reading blocks from the driver and/or other executors.
+   * Executor 上的广播对象值。通过 [[readBroadcastBlock]] 读取块并重构此值。
    *
-   * On the driver, if the value is required, it is read lazily from the block manager. We hold
-   * a soft reference so that it can be garbage collected if required, as we can always reconstruct
-   * in the future. For internal broadcast variables where `serializedOnly = true`, we hold a
-   * WeakReference to allow the value to be reclaimed more aggressively.
+   * 在 driver 上，如需要该值则从 block manager 延迟读取。
+   * 为 SoftReference 以允许必要时垃圾回收（可重建）。
+   * 对于 `serializedOnly = true` 的内部广播变量，使用 WeakReference 以更激进地回收内存。
    */
   @transient private var _value: Reference[T] = _
 
-  /** The compression codec to use, or None if compression is disabled */
+  /** 使用的压缩编码器，若禁用压缩则为 None */
   @transient private var compressionCodec: Option[CompressionCodec] = _
-  /** Size of each block. Default value is 4MB.  This value is only read by the broadcaster. */
+  /** 每个块的大小。默认值 4MB。仅由广播者读取 */
   @transient private var blockSize: Int = _
-  /** Is the execution in local mode. */
+  /** 是否在本地模式执行 */
   @transient private var isLocalMaster: Boolean = _
 
-  /** Whether to generate checksum for blocks or not. */
+  /** 是否为块生成校验和 */
   private var checksumEnabled: Boolean = false
 
   private def setConf(conf: SparkConf): Unit = {
@@ -87,7 +81,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long, serializedO
     } else {
       None
     }
-    // Note: use getSizeAsKb (not bytes) to maintain compatibility if no units are provided
+    // 注意：使用 getSizeAsKb（不是 byte）以保持兼容性
     blockSize = conf.get(config.BROADCAST_BLOCKSIZE).toInt * 1024
     checksumEnabled = conf.get(config.BROADCAST_CHECKSUM)
     isLocalMaster = Utils.isLocalMaster(conf)
@@ -96,12 +90,13 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long, serializedO
 
   private val broadcastId = BroadcastBlockId(id)
 
-  /** Total number of blocks this broadcast variable contains. */
+  /** 该广播变量包含的块的总数 */
   private val numBlocks: Int = writeBlocks(obj)
 
-  /** The checksum for all the blocks. */
+  /** 所有块的校验和数组 */
   private var checksums: Array[Int] = _
 
+  /** 获取广播值，第一次时从块读取并缓存 */
   override protected def getValue() = synchronized {
     val memoized: T = if (_value == null) null.asInstanceOf[T] else _value.get
     if (memoized != null) {
