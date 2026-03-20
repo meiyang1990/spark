@@ -50,10 +50,14 @@ import org.apache.spark.util.ArrayImplicits._
 
 /**
  * A Spark split class that wraps around a Hadoop InputSplit.
+ *
+ * HadoopPartition 是 HadoopRDD 的分区类，封装了 Hadoop 的 InputSplit。
+ * 每个 InputSplit 对应 HDFS 文件的一个 Block（或多个小文件合并）
  */
 private[spark] class HadoopPartition(rddId: Int, override val index: Int, s: InputSplit)
   extends Partition {
 
+  // 包装 InputSplit 使其可序列化
   val inputSplit = new SerializableWritable[InputSplit](s)
 
   override def hashCode(): Int = 31 * (31 + rddId) + index
@@ -62,6 +66,7 @@ private[spark] class HadoopPartition(rddId: Int, override val index: Int, s: Inp
 
   /**
    * Get any environment variables that should be added to the users environment when running pipes
+   * 获取 pipe 操作需要的环境变量（如输入文件路径）
    * @return a Map with the environment variables and corresponding values, it could be empty
    */
   def getPipeEnvVars(): Map[String, String] = {
@@ -83,18 +88,36 @@ private[spark] class HadoopPartition(rddId: Int, override val index: Int, s: Inp
  * An RDD that provides core functionality for reading data stored in Hadoop (e.g., files in HDFS,
  * sources in HBase, or S3), using the older MapReduce API (`org.apache.hadoop.mapred`).
  *
+ * HadoopRDD 是 Spark 读取 Hadoop 数据源（HDFS、HBase、S3 等）的核心 RDD。
+ * 使用的是旧版 MapReduce API（org.apache.hadoop.mapred）。
+ *
+ * 工作原理：
+ *   1. 通过 InputFormat.getSplits() 获取输入分片（每个分片通常对应一个 HDFS Block）
+ *   2. 每个分片成为一个 RDD 分区
+ *   3. 通过 RecordReader 读取分片中的数据
+ *
+ * 数据本地化：
+ *   HadoopRDD 会根据 InputSplit 的位置信息返回首选计算位置，
+ *   调度器会尽量将任务调度到数据所在的节点，减少网络传输
+ *
  * @param sc The SparkContext to associate the RDD with.
  * @param broadcastedConf A general Hadoop Configuration, or a subclass of it. If the enclosed
  *   variable references an instance of JobConf, then that JobConf will be used for the Hadoop job.
  *   Otherwise, a new JobConf will be created on each executor using the enclosed Configuration.
+ *   广播的 Hadoop 配置（避免每个任务都序列化一份完整配置）
  * @param initLocalJobConfFuncOpt Optional closure used to initialize any JobConf that HadoopRDD
  *     creates.
+ *     可选的 JobConf 初始化函数
  * @param inputFormatClass Storage format of the data to be read.
+ *     输入格式类（如 TextInputFormat、SequenceFileInputFormat）
  * @param keyClass Class of the key associated with the inputFormatClass.
  * @param valueClass Class of the value associated with the inputFormatClass.
  * @param minPartitions Minimum number of HadoopRDD partitions (Hadoop Splits) to generate.
+ *     最小分区数
  * @param ignoreCorruptFiles Whether to ignore corrupt files.
+ *     是否忽略损坏的文件
  * @param ignoreMissingFiles Whether to ignore missing files.
+ *     是否忽略缺失的文件
  *
  * @note Instantiating this class directly is not recommended, please use
  * `org.apache.spark.SparkContext.hadoopRDD()`
@@ -165,6 +188,10 @@ class HadoopRDD[K, V](
 
   private val ignoreEmptySplits = sparkContext.conf.get(HADOOP_RDD_IGNORE_EMPTY_SPLITS)
 
+  /**
+   * 获取 JobConf 配置对象，会在 Executor 上使用。
+   * 为了避免 Configuration 的线程安全问题，可能需要克隆配置
+   */
   // Returns a JobConf that will be used on executors to obtain input splits for Hadoop reads.
   protected def getJobConf(): JobConf = {
     val conf: Configuration = broadcastedConf.value.value
@@ -214,6 +241,9 @@ class HadoopRDD[K, V](
     }
   }
 
+  /**
+   * 通过反射创建 InputFormat 实例
+   */
   protected def getInputFormat(conf: JobConf): InputFormat[K, V] = try {
     ReflectionUtils.newInstance(inputFormatClass.asInstanceOf[Class[_]], conf)
       .asInstanceOf[InputFormat[K, V]]
@@ -223,6 +253,11 @@ class HadoopRDD[K, V](
       throw new RuntimeException(s"Failed to instantiate ${inputFormatClass.getName}", r.getCause)
   }
 
+  /**
+   * 获取 RDD 的分区数组。
+   * 通过 InputFormat.getSplits() 获取输入分片，每个分片对应一个分区。
+   * 分区数取决于 HDFS 文件的 Block 数和 minPartitions 参数
+   */
   override def getPartitions: Array[Partition] = {
     val jobConf = getJobConf()
     // add the credentials here as this can be called before SparkContext initialized
@@ -266,6 +301,20 @@ class HadoopRDD[K, V](
     }
   }
 
+  /**
+   * 计算分区数据，这是 HadoopRDD 的核心方法。
+   *
+   * 执行流程：
+   *   1. 获取分区对应的 InputSplit
+   *   2. 创建 RecordReader 来读取数据
+   *   3. 返回一个迭代器，逐条读取记录
+   *   4. 任务完成时关闭 RecordReader 并更新输入指标
+   *
+   * 特殊处理：
+   *   - 支持忽略损坏文件（ignoreCorruptFiles）
+   *   - 支持忽略缺失文件（ignoreMissingFiles）
+   *   - 统计读取的字节数和记录数
+   */
   override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
     val iter = new NextIterator[(K, V)] {
 
@@ -401,6 +450,10 @@ class HadoopRDD[K, V](
     new HadoopMapPartitionsWithSplitRDD(this, f, preservesPartitioning)
   }
 
+  /**
+   * 获取分区的首选计算位置，实现数据本地化。
+   * 通过 InputSplit 的位置信息（HDFS Block 所在的 DataNode）来确定
+   */
   override def getPreferredLocations(split: Partition): Seq[String] = {
     val hsplit = split.asInstanceOf[HadoopPartition].inputSplit.value
     val locs = hsplit match {
@@ -411,10 +464,17 @@ class HadoopRDD[K, V](
     locs.getOrElse(hsplit.getLocations.filter(_ != "localhost").toImmutableArraySeq)
   }
 
+  /**
+   * HadoopRDD 不支持 checkpoint，因为它直接从外部数据源读取
+   */
   override def checkpoint(): Unit = {
     // Do nothing. Hadoop RDD should not be checkpointed.
   }
 
+  /**
+   * 持久化时的警告：由于 Hadoop RecordReader 会复用对象，
+   * 以反序列化形式缓存可能导致意外行为
+   */
   override def persist(storageLevel: StorageLevel): this.type = {
     if (storageLevel.deserialized) {
       logWarning("Caching HadoopRDDs as deserialized objects usually leads to undesired" +
@@ -427,10 +487,15 @@ class HadoopRDD[K, V](
   def getConf: Configuration = getJobConf()
 }
 
+/**
+ * HadoopRDD 伴生对象，提供工具方法和缓存管理
+ */
 private[spark] object HadoopRDD extends Logging {
   /**
    * Configuration's constructor is not threadsafe (see SPARK-1097 and HADOOP-10456).
    * Therefore, we synchronize on this lock before calling new JobConf() or new Configuration().
+   *
+   * Hadoop Configuration 的构造函数不是线程安全的，需要使用锁来同步
    */
   val CONFIGURATION_INSTANTIATION_LOCK = new Object()
 
