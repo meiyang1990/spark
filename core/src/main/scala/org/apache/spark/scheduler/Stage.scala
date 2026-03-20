@@ -25,33 +25,28 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.util.CallSite
 
 /**
- * A stage is a set of parallel tasks all computing the same function that need to run as part
- * of a Spark job, where all the tasks have the same shuffle dependencies. Each DAG of tasks run
- * by the scheduler is split up into stages at the boundaries where shuffle occurs, and then the
- * DAGScheduler runs these stages in topological order.
+ * Stage是一组并行任务的集合，这些任务执行相同的计算函数，具有相同的Shuffle依赖。
+ * 调度器运行的每个任务DAG在Shuffle边界处被拆分为多个Stage，
+ * 然后DAGScheduler按拓扑顺序执行这些Stage。
  *
- * Each Stage can either be a shuffle map stage, in which case its tasks' results are input for
- * other stage(s), or a result stage, in which case its tasks directly compute a Spark action
- * (e.g. count(), save(), etc) by running a function on an RDD. For shuffle map stages, we also
- * track the nodes that each output partition is on.
+ * Stage分为两种类型：
+ * 1. ShuffleMapStage：中间Stage，其任务结果作为后续Stage的输入
+ * 2. ResultStage：最终Stage，直接通过在RDD上运行函数来计算Spark action（如count()、save()等）
  *
- * Each Stage also has a firstJobId, identifying the job that first submitted the stage.  When FIFO
- * scheduling is used, this allows Stages from earlier jobs to be computed first or recovered
- * faster on failure.
+ * 对于ShuffleMapStage，还会跟踪每个输出分区所在的节点。
  *
- * Finally, a single stage can be re-executed in multiple attempts due to fault recovery. In that
- * case, the Stage object will track multiple StageInfo objects to pass to listeners or the web UI.
- * The latest one will be accessible through latestInfo.
+ * 每个Stage还有一个firstJobId，标识首次提交该Stage的作业。
+ * 在FIFO调度模式下，这允许较早作业的Stage优先计算或在故障时更快恢复。
  *
- * @param id Unique stage ID
- * @param rdd RDD that this stage runs on: for a shuffle map stage, it's the RDD we run map tasks
- *   on, while for a result stage, it's the target RDD that we ran an action on
- * @param numTasks Total number of tasks in stage; result stages in particular may not need to
- *   compute all partitions, e.g. for first(), lookup(), and take().
- * @param parents List of stages that this stage depends on (through shuffle dependencies).
- * @param firstJobId ID of the first job this stage was part of, for FIFO scheduling.
- * @param callSite Location in the user program associated with this stage: either where the target
- *   RDD was created, for a shuffle map stage, or where the action for a result stage was called.
+ * 由于故障恢复，单个Stage可能需要多次重试执行（称为"attempt"）。
+ * Stage对象会跟踪多个StageInfo对象，最新的可通过latestInfo访问。
+ *
+ * @param id Stage唯一ID
+ * @param rdd 此Stage运行的RDD：ShuffleMapStage是执行map任务的RDD，ResultStage是执行action的目标RDD
+ * @param numTasks Stage中的总任务数；ResultStage可能不需要计算所有分区（如first()、lookup()、take()）
+ * @param parents 此Stage依赖的父Stage列表（通过Shuffle依赖）
+ * @param firstJobId 此Stage所属的第一个作业ID，用于FIFO调度
+ * @param callSite 与此Stage关联的用户程序位置：ShuffleMapStage为目标RDD的创建位置，ResultStage为action调用位置
  */
 private[scheduler] abstract class Stage(
     val id: Int,
@@ -63,68 +58,68 @@ private[scheduler] abstract class Stage(
     val resourceProfileId: Int)
   extends Logging {
 
+  /** RDD的分区总数 */
   val numPartitions = rdd.partitions.length
 
-  /** Set of jobs that this stage belongs to. */
+  /** 此Stage所属的作业ID集合 */
   val jobIds = new HashSet[Int]
 
-  /** The ID to use for the next new attempt for this stage. */
+  /** 下一次尝试的ID */
   private var nextAttemptId: Int = 0
   private[scheduler] def getNextAttemptId: Int = nextAttemptId
 
   /**
-   * Whether checksum mismatches have been detected across different attempt of the stage, where
-   * checksum mismatches typically indicates that different stage attempts have produced different
-   * data.
+   * 是否在不同的Stage尝试之间检测到校验和不匹配。
+   * 校验和不匹配通常表示不同的Stage尝试产生了不同的数据（非确定性计算）。
    */
   private[scheduler] var isChecksumMismatched: Boolean = false
 
   /**
-   * The maximum of task attempt id where checksum mismatches are detected.
+   * 检测到校验和不匹配的最大任务尝试ID。
    */
   private[scheduler] var maxChecksumMismatchedId: Int = nextAttemptId
 
   /**
-   * The max attempt id we should ignore results for this stage, indicating there are ancestor
-   * stages having been detected with checksum mismatches. This stage is probably also
-   * indeterminate, so we need to avoid completing the stage and the job with incorrect result
-   * by ignoring the task output from previous attempts which might consume inconsistent data
+   * 应忽略此Stage结果的最大尝试ID。
+   * 当祖先Stage被检测到校验和不匹配时设置。该Stage可能也是非确定性的，
+   * 因此需要忽略之前尝试的任务输出（可能消费了不一致的数据），
+   * 以避免用错误的结果完成Stage和作业。
    */
   private[scheduler] var maxAttemptIdToIgnore: Option[Int] = None
 
+  /** Stage名称，取自调用位置的简短形式 */
   val name: String = callSite.shortForm
+  /** Stage详情，取自调用位置的长形式 */
   val details: String = callSite.longForm
 
   /**
-   * Pointer to the [[StageInfo]] object for the most recent attempt. This needs to be initialized
-   * here, before any attempts have actually been created, because the DAGScheduler uses this
-   * StageInfo to tell SparkListeners when a job starts (which happens before any stage attempts
-   * have been created).
+   * 指向最近一次尝试的 [[StageInfo]] 对象的指针。
+   * 需要在此处初始化（在任何尝试实际创建之前），因为DAGScheduler使用此StageInfo
+   * 在作业开始时通知SparkListener（这发生在任何Stage尝试创建之前）。
    */
   private var _latestInfo: StageInfo =
     StageInfo.fromStage(this, nextAttemptId, resourceProfileId = resourceProfileId)
 
   /**
-   * Set of stage attempt IDs that have failed. We keep track of these failures in order to avoid
-   * endless retries if a stage keeps failing.
-   * We keep track of each attempt ID that has failed to avoid recording duplicate failures if
-   * multiple tasks from the same stage attempt fail (SPARK-5945).
+   * 失败的Stage尝试ID集合。跟踪这些失败以避免Stage持续失败时无限重试。
+   * 跟踪每个失败的尝试ID以避免同一Stage尝试中多个任务失败时记录重复失败（SPARK-5945）。
    */
   val failedAttemptIds = new HashSet[Int]
 
+  /** 清除失败记录 */
   private[scheduler] def clearFailures() : Unit = {
     failedAttemptIds.clear()
   }
 
-  /** Mark the latest attempt as rollback */
+  /** 将最新尝试标记为回滚状态 */
   private[scheduler] def markAsRollingBack(): Unit = {
-    // Only if the stage has been submitted
+    // 仅当Stage已提交过时才执行
     if (getNextAttemptId > 0) {
       maxAttemptIdToIgnore = Some(latestInfo.attemptNumber())
     }
   }
 
-  /** Creates a new attempt for this stage by creating a new StageInfo with a new attempt ID. */
+  /** 通过创建带有新尝试ID的StageInfo来为此Stage创建新的尝试 */
   def makeNewStageAttempt(
       numPartitionsToCompute: Int,
       taskLocalityPreferences: Seq[Seq[TaskLocation]] = Seq.empty): Unit = {
@@ -136,14 +131,14 @@ private[scheduler] abstract class Stage(
     nextAttemptId += 1
   }
 
-  /** Forward the nextAttemptId if skipped and get visited for the first time. */
+  /** 如果Stage被跳过且首次访问，则递增nextAttemptId */
   def increaseAttemptIdOnFirstSkip(): Unit = {
     if (nextAttemptId == 0) {
       nextAttemptId = 1
     }
   }
 
-  /** Returns the StageInfo for the most recent attempt for this stage. */
+  /** 返回此Stage最近一次尝试的StageInfo */
   def latestInfo: StageInfo = _latestInfo
 
   override final def hashCode(): Int = id
@@ -153,6 +148,6 @@ private[scheduler] abstract class Stage(
     case _ => false
   }
 
-  /** Returns the sequence of partition ids that are missing (i.e. needs to be computed). */
+  /** 返回缺失的（即需要计算的）分区ID序列 */
   def findMissingPartitions(): Seq[Int]
 }

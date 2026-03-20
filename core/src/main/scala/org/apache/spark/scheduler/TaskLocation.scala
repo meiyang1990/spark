@@ -18,16 +18,17 @@
 package org.apache.spark.scheduler
 
 /**
- * A location where a task should run. This can either be a host or a (host, executorID) pair.
- * In the latter case, we will prefer to launch the task on that executorID, but our next level
- * of preference will be executors on the same host if this is not possible.
+ * 任务应该运行的位置。可以是一个主机名，也可以是（主机名, executorID）对。
+ * 在后一种情况下，会优先在指定的executorID上启动任务；
+ * 如果不可行，则退而求其次选择同一主机上的其他Executor。
  */
 private[spark] sealed trait TaskLocation {
   def host: String
 }
 
 /**
- * A location that includes both a host and an executor id on that host.
+ * 包含主机名和该主机上Executor ID的任务位置。
+ * 表示数据已缓存在特定Executor的内存中。
  */
 private [spark]
 case class ExecutorCacheTaskLocation(override val host: String, executorId: String)
@@ -36,26 +37,26 @@ case class ExecutorCacheTaskLocation(override val host: String, executorId: Stri
 }
 
 /**
- * A location on a host.
+ * 仅包含主机名的任务位置，表示数据在该主机上（如本地磁盘）。
  */
 private [spark] case class HostTaskLocation(override val host: String) extends TaskLocation {
   override def toString: String = host
 }
 
 /**
- * A location on a host that is cached by HDFS.
+ * 数据被HDFS缓存在内存中的主机位置。
  */
 private [spark] case class HDFSCacheTaskLocation(override val host: String) extends TaskLocation {
   override def toString: String = TaskLocation.inMemoryLocationTag + host
 }
 
 private[spark] object TaskLocation {
-  // We identify hosts on which the block is cached with this prefix.  Because this prefix contains
-  // underscores, which are not legal characters in hostnames, there should be no potential for
-  // confusion.  See  RFC 952 and RFC 1123 for information about the format of hostnames.
+  // 标识数据块被HDFS缓存的主机前缀。
+  // 由于此前缀包含下划线（主机名中不合法的字符），因此不会与真实主机名混淆。
+  // 参见 RFC 952 和 RFC 1123 关于主机名格式的规范。
   val inMemoryLocationTag = "hdfs_cache_"
 
-  // Identify locations of executors with this prefix.
+  // 标识Executor位置的前缀
   val executorLocationTag = "executor_"
 
   def apply(host: String, executorId: String): TaskLocation = {
@@ -63,13 +64,14 @@ private[spark] object TaskLocation {
   }
 
   /**
-   * Create a TaskLocation from a string returned by getPreferredLocations.
-   * These strings have the form executor_[hostname]_[executorid], [hostname], or
-   * hdfs_cache_[hostname], depending on whether the location is cached.
+   * 从 getPreferredLocations 返回的字符串创建 TaskLocation。
+   * 字符串格式为：executor_[hostname]_[executorid]、[hostname] 或
+   * hdfs_cache_[hostname]，取决于数据是否被缓存。
    */
   def apply(str: String): TaskLocation = {
     val hstr = str.stripPrefix(inMemoryLocationTag)
     if (hstr.equals(str)) {
+      // 不是HDFS缓存位置，检查是否为Executor位置
       if (str.startsWith(executorLocationTag)) {
         val hostAndExecutorId = str.stripPrefix(executorLocationTag)
         val splits = hostAndExecutorId.split("_", 2)
@@ -77,9 +79,11 @@ private[spark] object TaskLocation {
         val Array(host, executorId) = splits
         new ExecutorCacheTaskLocation(host, executorId)
       } else {
+        // 普通主机位置
         new HostTaskLocation(str)
       }
     } else {
+      // HDFS内存缓存位置
       new HDFSCacheTaskLocation(hstr)
     }
   }

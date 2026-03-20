@@ -29,39 +29,40 @@ import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util.Utils
 
 /**
- * A common trait between [[MapStatus]] and [[MergeStatus]]. This allows us to reuse existing
- * code to handle MergeStatus inside MapOutputTracker.
+ * [[MapStatus]] 和 [[MergeStatus]] 的公共特质。
+ * 允许在 MapOutputTracker 中复用已有代码来处理 MergeStatus。
  */
 private[spark] trait ShuffleOutputStatus
 
 /**
- * Result returned by a ShuffleMapTask to a scheduler. Includes the block manager address that the
- * task has shuffle files stored on as well as the sizes of outputs for each reducer, for passing
- * on to the reduce tasks.
+ * ShuffleMapTask 返回给调度器的结果。
+ * 包含任务 Shuffle 文件存储位置的 BlockManager 地址，以及每个 Reducer 的输出大小，
+ * 用于传递给 Reduce 任务。
  */
 private[spark] sealed trait MapStatus extends ShuffleOutputStatus {
-  /** Location where this task output is. */
+  /** 任务输出所在的 BlockManager 位置 */
   def location: BlockManagerId
 
+  /** 更新输出位置 */
   def updateLocation(newLoc: BlockManagerId): Unit
 
   /**
-   * Estimated size for the reduce block, in bytes.
+   * Reduce 块的估计大小（字节）。
    *
-   * If a block is non-empty, then this method MUST return a non-zero size.  This invariant is
-   * necessary for correctness, since block fetchers are allowed to skip zero-size blocks.
+   * 如果块非空，此方法必须返回非零值。此不变量对正确性是必要的，
+   * 因为块获取器允许跳过零大小的块。
    */
   def getSizeForBlock(reduceId: Int): Long
 
   /**
-   * The unique ID of this shuffle map task, if spark.shuffle.useOldFetchProtocol enabled we use
-   * partitionId of the task or taskContext.taskAttemptId is used.
+   * 此 Shuffle Map 任务的唯一ID。
+   * 如果启用了 spark.shuffle.useOldFetchProtocol，则使用任务的 partitionId，
+   * 否则使用 taskContext.taskAttemptId。
    */
   def mapId: Long
 
   /**
-   * The checksum value of this shuffle map task, which can be used to evaluate whether the
-   * output data has changed across different map task retries.
+   * 此 Shuffle Map 任务的校验和值，可用于评估不同 Map 任务重试之间输出数据是否发生变化。
    */
   def checksumValue: Long = 0
 }
@@ -70,13 +71,17 @@ private[spark] sealed trait MapStatus extends ShuffleOutputStatus {
 private[spark] object MapStatus {
 
   /**
-   * Min partition number to use [[HighlyCompressedMapStatus]]. A bit ugly here because in test
-   * code we can't assume SparkEnv.get exists.
+   * 使用 [[HighlyCompressedMapStatus]] 的最小分区数阈值。
+   * 这里略显不优雅，因为在测试代码中不能假设 SparkEnv.get 存在。
    */
   private lazy val minPartitionsToUseHighlyCompressMapStatus = Option(SparkEnv.get)
     .map(_.conf.get(config.SHUFFLE_MIN_NUM_PARTS_TO_HIGHLY_COMPRESS))
     .getOrElse(config.SHUFFLE_MIN_NUM_PARTS_TO_HIGHLY_COMPRESS.defaultValue.get)
 
+  /**
+   * 工厂方法：根据分区数选择合适的 MapStatus 实现。
+   * 分区数较多时使用 HighlyCompressedMapStatus 以节省内存，否则使用 CompressedMapStatus。
+   */
   def apply(
       loc: BlockManagerId,
       uncompressedSizes: Array[Long],
@@ -89,12 +94,12 @@ private[spark] object MapStatus {
     }
   }
 
+  // 压缩的对数底数
   private[this] val LOG_BASE = 1.1
 
   /**
-   * Compress a size in bytes to 8 bits for efficient reporting of map output sizes.
-   * We do this by encoding the log base 1.1 of the size as an integer, which can support
-   * sizes up to 35 GB with at most 10% error.
+   * 将字节大小压缩为 8 位，用于高效报告 Map 输出大小。
+   * 通过编码 log(1.1) 的值为整数实现，最大可支持 35GB 的大小，误差不超过 10%。
    */
   def compressSize(size: Long): Byte = {
     if (size == 0) {
@@ -107,7 +112,7 @@ private[spark] object MapStatus {
   }
 
   /**
-   * Decompress an 8-bit encoded block size, using the reverse operation of compressSize.
+   * 解压缩 8 位编码的块大小，是 compressSize 的逆操作。
    */
   def decompressSize(compressedSize: Byte): Long = {
     if (compressedSize == 0) {
@@ -120,13 +125,12 @@ private[spark] object MapStatus {
 
 
 /**
- * A [[MapStatus]] implementation that tracks the size of each block. Size for each block is
- * represented using a single byte.
+ * [[MapStatus]] 实现：使用单字节跟踪每个块的大小。
  *
- * @param loc location where the task is being executed.
- * @param compressedSizes size of the blocks, indexed by reduce partition id.
- * @param _mapTaskId unique task id for the task
- * @param _checksumVal the checksum value for the task
+ * @param loc 任务执行所在位置
+ * @param compressedSizes 块大小数组，按 reduce 分区ID 索引
+ * @param _mapTaskId 任务的唯一ID
+ * @param _checksumVal 任务的校验和值
  */
 private[spark] class CompressedMapStatus(
     private[this] var loc: BlockManagerId,
@@ -179,17 +183,17 @@ private[spark] class CompressedMapStatus(
 }
 
 /**
- * A [[MapStatus]] implementation that stores the accurate size of huge blocks, which are larger
- * than spark.shuffle.accurateBlockThreshold. It stores the average size of other non-empty blocks,
- * plus a bitmap for tracking which blocks are empty.
+ * [[MapStatus]] 实现：精确存储大块（超过 spark.shuffle.accurateBlockThreshold 阈值）的大小，
+ * 同时存储其余非空块的平均大小，并使用位图跟踪哪些块为空。
+ * 这种实现在分区数很多时能显著减少内存占用。
  *
- * @param loc location where the task is being executed
- * @param numNonEmptyBlocks the number of non-empty blocks
- * @param emptyBlocks a bitmap tracking which blocks are empty
- * @param avgSize average size of the non-empty and non-huge blocks
- * @param hugeBlockSizes sizes of huge blocks by their reduceId.
- * @param _mapTaskId unique task id for the task
- * @param _checksumVal checksum value for the task
+ * @param loc 任务执行所在位置
+ * @param numNonEmptyBlocks 非空块的数量
+ * @param emptyBlocks 跟踪空块的位图
+ * @param avgSize 非空且非大块的平均大小
+ * @param hugeBlockSizes 大块的压缩大小，按 reduceId 索引
+ * @param _mapTaskId 任务的唯一ID
+ * @param _checksumVal 任务的校验和值
  */
 private[spark] class HighlyCompressedMapStatus private (
     private[this] var loc: BlockManagerId,

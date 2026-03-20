@@ -18,9 +18,10 @@
 package org.apache.spark.scheduler
 
 /**
- *  "FAIR" and "FIFO" determines which policy is used
- *    to order tasks amongst a Schedulable's sub-queues
- *  "NONE" is used when the a Schedulable has no sub-queues.
+ * 调度模式枚举：
+ * - FAIR：公平调度，在Schedulable的子队列之间公平分配资源
+ * - FIFO：先进先出调度，按提交顺序执行
+ * - NONE：无子队列时使用（叶子节点）
  */
 object SchedulingMode extends Enumeration {
 

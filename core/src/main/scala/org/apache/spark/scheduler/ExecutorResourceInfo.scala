@@ -20,19 +20,20 @@ package org.apache.spark.scheduler
 import org.apache.spark.resource.{ResourceAllocator, ResourceInformation}
 
 /**
- * Class to hold information about a type of Resource on an Executor. This information is managed
- * by SchedulerBackend, and TaskScheduler shall schedule tasks on idle Executors based on the
- * information.
- * @param name Resource name
- * @param addresses Resource addresses provided by the executor
+ * 保存Executor上某种资源类型信息的类。
+ * 此信息由SchedulerBackend管理，TaskScheduler根据这些信息在空闲Executor上调度任务。
+ *
+ * @param name 资源名称（如"gpu"、"fpga"等）
+ * @param addresses Executor提供的资源地址列表（如GPU的设备索引）
  */
 private[spark] class ExecutorResourceInfo(
     name: String,
     addresses: Seq[String])
   extends ResourceInformation(name, addresses.toArray) with ResourceAllocator {
 
-  override protected def resourceName = this.name
-  override protected def resourceAddresses = this.addresses
+  override protected def resourceName = this.name       // 资源名称
+  override protected def resourceAddresses = this.addresses // 资源地址列表
+  /** 资源地址的总数量 */
   def totalAddressesAmount: Int = this.addresses.length
 
 }

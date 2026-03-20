@@ -21,13 +21,15 @@ import org.apache.spark.annotation.DeveloperApi
 
 /**
  * :: DeveloperApi ::
- * A result of a job in the DAGScheduler.
+ * DAGScheduler中作业的执行结果。密封特质，只有两种实现：成功或失败。
  */
 @DeveloperApi
 sealed trait JobResult
 
+/** 作业成功完成 */
 @DeveloperApi
 case object JobSucceeded extends JobResult
 
+/** 作业执行失败，包含失败原因的异常信息 */
 @DeveloperApi
 case class JobFailed(exception: Exception) extends JobResult

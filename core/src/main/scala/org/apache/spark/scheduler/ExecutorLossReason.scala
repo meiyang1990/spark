@@ -20,18 +20,25 @@ package org.apache.spark.scheduler
 import org.apache.spark.executor.ExecutorExitCode
 
 /**
- * Represents an explanation for an executor or whole process failing or exiting.
+ * 表示Executor或整个进程失败/退出原因的基类。
  */
 private[spark]
 class ExecutorLossReason(val message: String) extends Serializable {
   override def toString: String = message
 }
 
+/**
+ * Executor以指定退出码退出。
+ * @param exitCode 进程退出码
+ * @param exitCausedByApp 退出是否由应用程序引起
+ * @param reason 退出原因的可读描述
+ */
 private[spark]
 case class ExecutorExited(exitCode: Int, exitCausedByApp: Boolean, reason: String)
   extends ExecutorLossReason(reason)
 
 private[spark] object ExecutorExited {
+  /** 根据退出码自动生成退出原因描述 */
   def apply(exitCode: Int, exitCausedByApp: Boolean): ExecutorExited = {
     ExecutorExited(
       exitCode,
@@ -40,27 +47,27 @@ private[spark] object ExecutorExited {
   }
 }
 
+/** Executor丢失的消息常量 */
 private[spark] object ExecutorLossMessage {
   val decommissionFinished = "Finished decommissioning"
 }
 
+/** Executor被Driver主动杀死 */
 private[spark] object ExecutorKilled extends ExecutorLossReason("Executor killed by driver.")
 
 /**
- * A loss reason that means we don't yet know why the executor exited.
+ * 表示尚不知道Executor退出原因的丢失原因。
  *
- * This is used by the task scheduler to remove state associated with the executor, but
- * not yet fail any tasks that were running in the executor before the real loss reason
- * is known.
+ * 任务调度器用此来移除与Executor关联的状态，但在真正的丢失原因确定之前，
+ * 不会立即将该Executor上正在运行的任务标记为失败。
  */
 private [spark] object LossReasonPending extends ExecutorLossReason("Pending loss reason.")
 
 /**
- * @param _message human readable loss reason
- * @param workerHost it's defined when the host is confirmed lost too (i.e. including
- *                   shuffle service)
- * @param causedByApp whether the loss of the executor is the fault of the running app.
- *                    (assumed true by default unless known explicitly otherwise)
+ * Executor进程丢失。
+ * @param _message 人类可读的丢失原因
+ * @param workerHost 如果定义了，表示主机也确认丢失（包括Shuffle服务）
+ * @param causedByApp 丢失是否由运行中的应用引起（默认为true，除非明确知道不是）
  */
 private[spark]
 case class ExecutorProcessLost(
@@ -70,14 +77,14 @@ case class ExecutorProcessLost(
   extends ExecutorLossReason(_message)
 
 /**
- * A loss reason that means the executor is marked for decommissioning.
+ * 表示Executor被标记为下线（decommission）的丢失原因。
  *
- * This is used by the task scheduler to remove state associated with the executor, but
- * not yet fail any tasks that were running in the executor before the executor is "fully" lost.
- * If you update this code make sure to re-run the K8s integration tests.
+ * 任务调度器用此来移除与Executor关联的状态，但在Executor"完全"丢失之前，
+ * 不会立即将其上正在运行的任务标记为失败。
+ * 如果修改此代码，请确保重新运行K8s集成测试。
  *
- * @param workerHost it is defined when the worker is decommissioned too
- * @param reason detailed decommission message
+ * @param workerHost 如果定义了，表示Worker也被下线
+ * @param reason 详细的下线原因消息
  */
 private [spark] case class ExecutorDecommission(
     workerHost: Option[String] = None,

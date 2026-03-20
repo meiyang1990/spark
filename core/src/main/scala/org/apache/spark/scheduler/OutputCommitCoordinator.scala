@@ -24,9 +24,12 @@ import org.apache.spark.internal.{Logging, LogKeys}
 import org.apache.spark.rpc.{RpcCallContext, RpcEndpoint, RpcEndpointRef, RpcEnv}
 import org.apache.spark.util.{RpcUtils, ThreadUtils}
 
+/** 输出提交协调的内部消息 */
 private sealed trait OutputCommitCoordinationMessage extends Serializable
 
+/** 停止协调器消息 */
 private case object StopCoordinator extends OutputCommitCoordinationMessage
+/** 请求提交输出的消息 */
 private case class AskPermissionToCommitOutput(
     stage: Int,
     stageAttempt: Int,
@@ -34,63 +37,57 @@ private case class AskPermissionToCommitOutput(
     attemptNumber: Int)
 
 /**
- * Authority that decides whether tasks can commit output to HDFS. Uses a "first committer wins"
- * policy.
+ * 决定任务是否可以向 HDFS 提交输出的权威组件。采用"先到先得"策略。
  *
- * OutputCommitCoordinator is instantiated in both the drivers and executors. On executors, it is
- * configured with a reference to the driver's OutputCommitCoordinatorEndpoint, so requests to
- * commit output will be forwarded to the driver's OutputCommitCoordinator.
+ * OutputCommitCoordinator 在 Driver 和 Executor 中都会实例化。在 Executor 上，
+ * 它配置了指向 Driver 端 OutputCommitCoordinatorEndpoint 的引用，
+ * 因此提交输出的请求会被转发到 Driver 端的 OutputCommitCoordinator。
  *
- * This class was introduced in SPARK-4879; see that JIRA issue (and the associated pull requests)
- * for an extensive design discussion.
+ * 此类在 SPARK-4879 中引入；详见该 JIRA issue（及相关的 Pull Request）了解设计讨论。
  */
 private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean) extends Logging {
 
-  // Initialized by SparkEnv
+  // 由 SparkEnv 初始化
   var coordinatorRef: Option[RpcEndpointRef] = None
 
-  // Class used to identify a committer. The task ID for a committer is implicitly defined by
-  // the partition being processed, but the coordinator needs to keep track of both the stage
-  // attempt and the task attempt, because in some situations the same task may be running
-  // concurrently in two different attempts of the same stage.
+  // 用于标识提交者的类。提交者的任务ID由处理的分区隐式定义，
+  // 但协调器需要同时跟踪 Stage 尝试和任务尝试，因为某些情况下
+  // 同一任务可能在同一 Stage 的两个不同尝试中并发运行。
   private case class TaskIdentifier(stageAttempt: Int, taskAttempt: Int)
 
+  /** Stage 状态：跟踪每个分区的授权提交者和已知的失败尝试 */
   private case class StageState(numPartitions: Int) {
     val authorizedCommitters = Array.fill[TaskIdentifier](numPartitions)(null)
     val failures = mutable.Map[Int, mutable.Set[TaskIdentifier]]()
   }
 
   /**
-   * Map from active stages's id => authorized task attempts for each partition id, which hold an
-   * exclusive lock on committing task output for that partition, as well as any known failed
-   * attempts in the stage.
+   * 活跃 Stage ID 到其授权任务尝试的映射，每个分区持有提交任务输出的排他锁，
+   * 以及该 Stage 中所有已知的失败尝试。
    *
-   * Entries are added to the top-level map when stages start and are removed they finish
-   * (either successfully or unsuccessfully).
+   * Stage 开始时添加条目，结束时（无论成功或失败）移除条目。
    *
-   * Access to this map should be guarded by synchronizing on the OutputCommitCoordinator instance.
+   * 对此映射的访问应通过对 OutputCommitCoordinator 实例进行同步来保护。
    */
   private val stageStates = mutable.Map[Int, StageState]()
 
   /**
-   * Returns whether the OutputCommitCoordinator's internal data structures are all empty.
+   * 返回 OutputCommitCoordinator 的内部数据结构是否全部为空。
    */
   def isEmpty: Boolean = {
     stageStates.isEmpty
   }
 
   /**
-   * Called by tasks to ask whether they can commit their output to HDFS.
+   * 由任务调用，询问它们是否可以向 HDFS 提交输出。
    *
-   * If a task attempt has been authorized to commit, then all other attempts to commit the same
-   * task will be denied.  If the authorized task attempt fails (e.g. due to its executor being
-   * lost), then a subsequent task attempt may be authorized to commit its output.
+   * 如果一个任务尝试已被授权提交，则提交同一任务的所有其他尝试将被拒绝。
+   * 如果已授权的任务尝试失败（例如 Executor 丢失），则后续的任务尝试可能被授权提交输出。
    *
-   * @param stage the stage number
-   * @param partition the partition number
-   * @param attemptNumber how many times this task has been attempted
-   *                      (see [[TaskContext.attemptNumber()]])
-   * @return true if this task is authorized to commit, false otherwise
+   * @param stage Stage 编号
+   * @param partition 分区编号
+   * @param attemptNumber 此任务被尝试的次数（参见 [[TaskContext.attemptNumber()]]）
+   * @return 如果此任务被授权提交则返回 true，否则返回 false
    */
   def canCommit(
       stage: Int,
@@ -110,12 +107,11 @@ private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean)
   }
 
   /**
-   * Called by the DAGScheduler when a stage starts. Initializes the stage's state if it hasn't
-   * yet been initialized.
+   * 由 DAGScheduler 在 Stage 启动时调用。初始化 Stage 的状态（如果尚未初始化）。
    *
-   * @param stage the stage id.
-   * @param maxPartitionId the maximum partition id that could appear in this stage's tasks (i.e.
-   *                       the maximum possible value of `context.partitionId`).
+   * @param stage Stage ID
+   * @param maxPartitionId 此 Stage 任务中可能出现的最大分区ID
+   *                       （即 context.partitionId 的最大可能值）
    */
   private[scheduler] def stageStart(stage: Int, maxPartitionId: Int): Unit = synchronized {
     stageStates.get(stage) match {
@@ -128,12 +124,12 @@ private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean)
     }
   }
 
-  // Called by DAGScheduler
+  // 由 DAGScheduler 在 Stage 结束时调用，清理该 Stage 的状态
   private[scheduler] def stageEnd(stage: Int): Unit = synchronized {
     stageStates.remove(stage)
   }
 
-  // Called by DAGScheduler
+  // 由 DAGScheduler 在任务完成时调用，更新提交授权状态
   private[scheduler] def taskCompleted(
       stage: Int,
       stageAttempt: Int,
@@ -172,7 +168,8 @@ private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean)
     }
   }
 
-  // Marked private[scheduler] instead of private so this can be mocked in tests
+  // 标记为 private[scheduler] 而非 private，以便测试中可以 mock
+  /** 处理提交许可请求：检查是否已失败、是否已有授权提交者 */
   private[scheduler] def handleAskPermissionToCommit(
       stage: Int,
       stageAttempt: Int,
@@ -204,6 +201,7 @@ private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean)
     }
   }
 
+  /** 检查指定的任务尝试是否已被标记为失败 */
   private def attemptFailed(
       stageState: StageState,
       stageAttempt: Int,
@@ -216,7 +214,7 @@ private[spark] class OutputCommitCoordinator(conf: SparkConf, isDriver: Boolean)
 
 private[spark] object OutputCommitCoordinator {
 
-  // This endpoint is used only for RPC
+  // 此 RPC 端点仅用于远程通信，Executor 通过它向 Driver 请求提交许可
   private[spark] class OutputCommitCoordinatorEndpoint(
       override val rpcEnv: RpcEnv, outputCommitCoordinator: OutputCommitCoordinator)
     extends RpcEndpoint with Logging {

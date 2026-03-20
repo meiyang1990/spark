@@ -24,8 +24,13 @@ import scala.concurrent.{Future, Promise}
 import org.apache.spark.internal.Logging
 
 /**
- * An object that waits for a DAGScheduler job to complete. As tasks finish, it passes their
- * results to the given handler function.
+ * 等待DAGScheduler作业完成的对象。当任务完成时，将结果传递给指定的处理函数。
+ * 实现了JobListener接口，作为作业提交者与DAGScheduler之间的桥梁。
+ *
+ * @param dagScheduler DAG调度器引用，用于取消作业
+ * @param jobId 作业唯一ID
+ * @param totalTasks 作业包含的总任务数
+ * @param resultHandler 结果处理函数，接收分区索引和计算结果
  */
 private[spark] class JobWaiter[T](
     dagScheduler: DAGScheduler,
@@ -34,43 +39,46 @@ private[spark] class JobWaiter[T](
     resultHandler: (Int, T) => Unit)
   extends JobListener with Logging {
 
+  /** 已完成的任务计数器（原子操作保证线程安全） */
   private val finishedTasks = new AtomicInteger(0)
-  // If the job is finished, this will be its result. In the case of 0 task jobs (e.g. zero
-  // partition RDDs), we set the jobResult directly to JobSucceeded.
+  // 作业的Promise，用于异步等待结果。
+  // 对于0个任务的作业（如零分区RDD），直接设置为成功。
   private val jobPromise: Promise[Unit] =
     if (totalTasks == 0) Promise.successful(()) else Promise()
 
+  /** 作业是否已完成 */
   def jobFinished: Boolean = jobPromise.isCompleted
 
+  /** 获取作业完成的Future，调用者可以通过它阻塞等待或注册回调 */
   def completionFuture: Future[Unit] = jobPromise.future
 
   /**
-   * Sends a signal to the DAGScheduler to cancel the job with an optional reason. The
-   * cancellation itself is handled asynchronously. After the low level scheduler cancels
-   * all the tasks belonging to this job, it will fail this job with a SparkException.
+   * 向DAGScheduler发送取消作业的信号（可带取消原因）。
+   * 取消操作本身是异步处理的。底层调度器取消该作业的所有任务后，
+   * 会以SparkException使该作业失败。
    */
   def cancel(reason: Option[String]): Unit = {
     dagScheduler.cancelJob(jobId, reason)
   }
 
   /**
-   * Sends a signal to the DAGScheduler to cancel the job. The cancellation itself is
-   * handled asynchronously. After the low level scheduler cancels all the tasks belonging
-   * to this job, it will fail this job with a SparkException.
+   * 向DAGScheduler发送取消作业的信号（无原因）。
    */
   def cancel(): Unit = cancel(None)
 
   override def taskSucceeded(index: Int, result: Any): Unit = {
-    // resultHandler call must be synchronized in case resultHandler itself is not thread safe.
+    // 同步调用resultHandler，防止resultHandler本身非线程安全
     synchronized {
       resultHandler(index, result.asInstanceOf[T])
     }
+    // 所有任务都完成时，将Promise标记为成功
     if (finishedTasks.incrementAndGet() == totalTasks) {
       jobPromise.success(())
     }
   }
 
   override def jobFailed(exception: Exception): Unit = {
+    // 尝试将Promise标记为失败，如果已经完成则忽略
     if (!jobPromise.tryFailure(exception)) {
       logWarning("Ignore failure", exception)
     }

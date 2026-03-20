@@ -20,43 +20,42 @@ package org.apache.spark.scheduler
 import org.apache.spark.SparkContext
 
 /**
- * A cluster manager interface to plugin external scheduler.
+ * 外部集群管理器接口，用于插件化扩展调度器。
+ * 第三方集群管理器（如Mesos、Kubernetes等）通过实现此接口接入Spark的调度系统。
  */
 private[spark] trait ExternalClusterManager {
 
   /**
-   * Check if this cluster manager instance can create scheduler components
-   * for a certain master URL.
-   * @param masterURL the master URL
-   * @return True if the cluster manager can create scheduler backend/
+   * 检查此集群管理器实例是否能为指定的master URL创建调度组件。
+   * @param masterURL master URL
+   * @return 如果能创建调度后端，返回true
    */
   def canCreate(masterURL: String): Boolean
 
   /**
-   * Create a task scheduler instance for the given SparkContext
+   * 为给定的SparkContext创建任务调度器实例。
    * @param sc SparkContext
-   * @param masterURL the master URL
-   * @return TaskScheduler that will be responsible for task handling
+   * @param masterURL master URL
+   * @return 负责任务处理的TaskScheduler
    */
   def createTaskScheduler(sc: SparkContext, masterURL: String): TaskScheduler
 
   /**
-   * Create a scheduler backend for the given SparkContext and scheduler. This is
-   * called after task scheduler is created using `ExternalClusterManager.createTaskScheduler()`.
+   * 为给定的SparkContext和调度器创建调度后端。
+   * 此方法在通过 `ExternalClusterManager.createTaskScheduler()` 创建任务调度器之后调用。
    * @param sc SparkContext
-   * @param masterURL the master URL
-   * @param scheduler TaskScheduler that will be used with the scheduler backend.
-   * @return SchedulerBackend that works with a TaskScheduler
+   * @param masterURL master URL
+   * @param scheduler 将与调度后端配合使用的TaskScheduler
+   * @return 与TaskScheduler协同工作的SchedulerBackend
    */
   def createSchedulerBackend(sc: SparkContext,
       masterURL: String,
       scheduler: TaskScheduler): SchedulerBackend
 
   /**
-   * Initialize task scheduler and backend scheduler. This is called after the
-   * scheduler components are created
-   * @param scheduler TaskScheduler that will be responsible for task handling
-   * @param backend SchedulerBackend that works with a TaskScheduler
+   * 初始化任务调度器和后端调度器。在调度组件创建完成后调用。
+   * @param scheduler 负责任务处理的TaskScheduler
+   * @param backend 与TaskScheduler协同工作的SchedulerBackend
    */
   def initialize(scheduler: TaskScheduler, backend: SchedulerBackend): Unit
 }

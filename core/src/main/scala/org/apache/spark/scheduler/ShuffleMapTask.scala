@@ -27,29 +27,22 @@ import org.apache.spark.internal.{config, Logging}
 import org.apache.spark.rdd.RDD
 
 /**
- * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
- * specified in the ShuffleDependency).
+ * Shuffle Map任务（ShuffleMapTask）：将RDD的元素按分区器分到多个桶中。
+ * 参见 [[org.apache.spark.scheduler.Task]] 了解更多信息。
  *
- * See [[org.apache.spark.scheduler.Task]] for more information.
- *
- * @param stageId id of the stage this task belongs to
- * @param stageAttemptId attempt id of the stage this task belongs to
- * @param taskBinary broadcast version of the RDD and the ShuffleDependency. Once deserialized,
- *                   the type should be (RDD[_], ShuffleDependency[_, _, _]).
- * @param partition partition of the RDD this task is associated with
- * @param numPartitions Total number of partitions in the stage that this task belongs to.
- * @param locs preferred task execution locations for locality scheduling
- * @param artifacts list of artifacts (may be session-specific) of the job this task belongs to.
- * @param localProperties copy of thread-local properties set by the user on the driver side.
- * @param serializedTaskMetrics a `TaskMetrics` that is created and serialized on the driver side
- *                              and sent to executor side.
- *
- * The parameters below are optional:
- * @param jobId id of the job this task belongs to
- * @param appId id of the app this task belongs to
- * @param appAttemptId attempt id of the app this task belongs to
- * @param isBarrier whether this task belongs to a barrier stage. Spark must launch all the tasks
- *                  at the same time for a barrier stage.
+ * @param stageId 所属Stage的ID
+ * @param stageAttemptId 所属Stage的尝试ID
+ * @param taskBinary RDD和ShuffleDependency的广播变量。反序列化后类型为(RDD[_], ShuffleDependency[_, _, _])
+ * @param partition 此任务关联的RDD分区
+ * @param numPartitions 所属Stage中的总分区数
+ * @param locs 用于本地性调度的首选任务执行位置
+ * @param artifacts 所属作业的Artifact列表（可能是Session特定的）
+ * @param localProperties 用户在Driver端设置的线程本地属性副本
+ * @param serializedTaskMetrics Driver端创建并序列化的TaskMetrics
+ * @param jobId 所属作业ID（可选）
+ * @param appId 所属应用ID（可选）
+ * @param appAttemptId 所属应用尝试ID（可选）
+ * @param isBarrier 是否属于Barrier Stage（可选）
  */
 private[spark] class ShuffleMapTask(
     stageId: Int,

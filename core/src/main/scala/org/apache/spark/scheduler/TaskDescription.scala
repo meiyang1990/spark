@@ -30,21 +30,29 @@ import org.apache.spark.{JobArtifactSet, JobArtifactState}
 import org.apache.spark.util.{ByteBufferInputStream, ByteBufferOutputStream, Utils}
 
 /**
- * Description of a task that gets passed onto executors to be executed, usually created by
- * `TaskSetManager.resourceOffer`.
+ * 传递给Executor执行的任务描述信息，通常由`TaskSetManager.resourceOffer`创建。
  *
- * TaskDescriptions and the associated Task need to be serialized carefully for two reasons:
+ * TaskDescription和关联的Task需要仔细序列化，原因有两个：
  *
- *     (1) When a TaskDescription is received by an Executor, the Executor needs to first get the
- *         list of JARs and files and add these to the classpath, and set the properties, before
- *         deserializing the Task object (serializedTask). This is why the Properties are included
- *         in the TaskDescription, even though they're also in the serialized task.
- *     (2) Because a TaskDescription is serialized and sent to an executor for each task, efficient
- *         serialization (both in terms of serialization time and serialized buffer size) is
- *         important. For this reason, we serialize TaskDescriptions ourselves with the
- *         TaskDescription.encode and TaskDescription.decode methods.  This results in a smaller
- *         serialized size because it avoids serializing unnecessary fields in the Map objects
- *         (which can introduce significant overhead when the maps are small).
+ *     (1) 当Executor收到TaskDescription时，需要先获取JAR和文件列表并添加到类路径，
+ *         设置属性，然后才能反序列化Task对象（serializedTask）。
+ *         这就是为什么Properties也包含在TaskDescription中，尽管它们也在序列化的Task中。
+ *
+ *     (2) 由于每个任务都需要序列化并发送一个TaskDescription到Executor，
+ *         高效的序列化（序列化时间和缓冲区大小）非常重要。
+ *         因此使用自定义的encode/decode方法，避免序列化Map对象中的不必要字段。
+ *
+ * @param taskId 任务唯一ID
+ * @param attemptNumber 尝试编号
+ * @param executorId 目标Executor ID
+ * @param name 任务名称
+ * @param index 此任务在TaskSet中的索引
+ * @param partitionId 分区ID
+ * @param artifacts 作业Artifact集合
+ * @param properties 调度属性
+ * @param cpus 分配的CPU核心数
+ * @param resources 分配给任务的总资源，如 Map("gpu" -> Map("0" -> 0.7的内部表示))
+ * @param serializedTask 序列化后的Task对象
  */
 private[spark] class TaskDescription(
     val taskId: Long,

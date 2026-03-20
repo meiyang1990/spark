@@ -26,14 +26,13 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.util.{AccumulatorV2, CallSite}
 
 /**
- * Types of events that can be handled by the DAGScheduler. The DAGScheduler uses an event queue
- * architecture where any thread can post an event (e.g. a task finishing or a new job being
- * submitted) but there is a single "logic" thread that reads these events and takes decisions.
- * This greatly simplifies synchronization.
+ * DAGScheduler可以处理的事件类型。DAGScheduler使用事件队列架构，
+ * 任何线程都可以发布事件（如任务完成或新作业提交），
+ * 但只有一个"逻辑"线程读取这些事件并做出决策，这大大简化了同步问题。
  */
 private[scheduler] sealed trait DAGSchedulerEvent
 
-/** A result-yielding job was submitted on a target RDD */
+/** 在目标RDD上提交了一个产生结果的作业 */
 private[scheduler] case class JobSubmitted(
     jobId: Int,
     finalRDD: RDD[_],
@@ -45,7 +44,7 @@ private[scheduler] case class JobSubmitted(
     properties: Properties = null)
   extends DAGSchedulerEvent
 
-/** A map stage as submitted to run as a separate job */
+/** 作为独立作业提交了一个Map Stage */
 private[scheduler] case class MapStageSubmitted(
   jobId: Int,
   dependency: ShuffleDependency[_, _, _],
@@ -55,37 +54,46 @@ private[scheduler] case class MapStageSubmitted(
   properties: Properties = null)
   extends DAGSchedulerEvent
 
+/** 取消指定Stage */
 private[scheduler] case class StageCancelled(
     stageId: Int,
     reason: Option[String])
   extends DAGSchedulerEvent
 
+/** 取消指定作业 */
 private[scheduler] case class JobCancelled(
     jobId: Int,
     reason: Option[String])
   extends DAGSchedulerEvent
 
+/** 取消指定作业组 */
 private[scheduler] case class JobGroupCancelled(
     groupId: String,
     cancelFutureJobs: Boolean = false,
     reason: Option[String])
   extends DAGSchedulerEvent
 
+/** 按标签取消作业 */
 private[scheduler] case class JobTagCancelled(
     tagName: String,
     reason: Option[String],
     cancelledJobs: Option[Promise[Seq[ActiveJob]]]) extends DAGSchedulerEvent
 
+/** 取消所有作业 */
 private[scheduler] case object AllJobsCancelled extends DAGSchedulerEvent
 
+/** 清理指定查询的作业 */
 private[scheduler] case class CleanupQueryJobs(executionId: Long) extends DAGSchedulerEvent
 
+/** 任务开始执行事件 */
 private[scheduler]
 case class BeginEvent(task: Task[_], taskInfo: TaskInfo) extends DAGSchedulerEvent
 
+/** 正在获取任务结果的事件 */
 private[scheduler]
 case class GettingResultEvent(taskInfo: TaskInfo) extends DAGSchedulerEvent
 
+/** 任务完成事件，包含结果、累加器更新和度量峰值 */
 private[scheduler] case class CompletionEvent(
     task: Task[_],
     reason: TaskEndReason,
@@ -95,42 +103,54 @@ private[scheduler] case class CompletionEvent(
     taskInfo: TaskInfo)
   extends DAGSchedulerEvent
 
+/** 新增Executor事件 */
 private[scheduler] case class ExecutorAdded(execId: String, host: String) extends DAGSchedulerEvent
 
+/** Executor丢失事件 */
 private[scheduler] case class ExecutorLost(execId: String, reason: ExecutorLossReason)
   extends DAGSchedulerEvent
 
+/** Worker被移除事件 */
 private[scheduler] case class WorkerRemoved(workerId: String, host: String, message: String)
   extends DAGSchedulerEvent
 
+/** Stage失败事件 */
 private[scheduler]
 case class StageFailed(stageId: Int, reason: String, exception: Option[Throwable])
   extends DAGSchedulerEvent
 
+/** TaskSet失败事件 */
 private[scheduler]
 case class TaskSetFailed(taskSet: TaskSet, reason: String, exception: Option[Throwable])
   extends DAGSchedulerEvent
 
+/** 重新提交失败的Stage */
 private[scheduler] case object ResubmitFailedStages extends DAGSchedulerEvent
 
+/** 推测执行任务提交事件 */
 private[scheduler]
 case class SpeculativeTaskSubmitted(task: Task[_], taskIndex: Int = -1) extends DAGSchedulerEvent
 
+/** 不可调度的TaskSet添加事件 */
 private[scheduler]
 case class UnschedulableTaskSetAdded(stageId: Int, stageAttemptId: Int)
   extends DAGSchedulerEvent
 
+/** 不可调度的TaskSet移除事件 */
 private[scheduler]
 case class UnschedulableTaskSetRemoved(stageId: Int, stageAttemptId: Int)
   extends DAGSchedulerEvent
 
+/** 注册Shuffle合并状态事件 */
 private[scheduler] case class RegisterMergeStatuses(
     stage: ShuffleMapStage, mergeStatuses: Seq[(Int, MergeStatus)])
   extends DAGSchedulerEvent
 
+/** Shuffle合并完成事件 */
 private[scheduler] case class ShuffleMergeFinalized(stage: ShuffleMapStage)
   extends DAGSchedulerEvent
 
+/** Shuffle推送完成事件 */
 private[scheduler] case class ShufflePushCompleted(
     shuffleId: Int, shuffleMergeId: Int, mapIndex: Int)
   extends DAGSchedulerEvent

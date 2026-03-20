@@ -83,13 +83,12 @@ private[spark] class MergeStatus(
 }
 
 private[spark] object MergeStatus {
-  // Dummy number of reduces for the tests where push based shuffle is not enabled
+  // 推送式 Shuffle 未启用时用于测试的虚拟 Reduce 数量
   val SHUFFLE_PUSH_DUMMY_NUM_REDUCES = 1
 
   /**
-   * Separate a MergeStatuses received from an ExternalShuffleService into individual
-   * MergeStatus. The scheduler is responsible for providing the location information
-   * for the given ExternalShuffleService.
+   * 将从 ExternalShuffleService 接收的 MergeStatuses 拆分为单独的 MergeStatus。
+   * 调度器负责提供给定 ExternalShuffleService 的位置信息。
    */
   def convertMergeStatusesToMergeStatusArr(
       mergeStatuses: MergeStatuses,

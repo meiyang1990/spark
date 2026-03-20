@@ -19,13 +19,26 @@ package org.apache.spark.scheduler
 
 import org.apache.spark.annotation.DeveloperApi
 
+/**
+ * :: DeveloperApi ::
+ * 任务本地性级别枚举，从高到低排列：
+ * - PROCESS_LOCAL：进程本地，数据在同一JVM中（目前仅在TaskSetManager内部使用）
+ * - NODE_LOCAL：节点本地，数据在同一台物理机上
+ * - NO_PREF：无偏好，任务对位置没有特殊要求
+ * - RACK_LOCAL：机架本地，数据在同一机架的不同节点上
+ * - ANY：任意位置，可以在集群中的任何节点上运行
+ */
 @DeveloperApi
 object TaskLocality extends Enumeration {
-  // Process local is expected to be used ONLY within TaskSetManager for now.
+  // PROCESS_LOCAL 目前仅在 TaskSetManager 内部使用
   val PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY = Value
 
   type TaskLocality = Value
 
+  /**
+   * 判断在给定约束条件下，某个本地性级别是否被允许。
+   * 即condition的级别不低于constraint（枚举值越小优先级越高）。
+   */
   def isAllowed(constraint: TaskLocality, condition: TaskLocality): Boolean = {
     condition <= constraint
   }

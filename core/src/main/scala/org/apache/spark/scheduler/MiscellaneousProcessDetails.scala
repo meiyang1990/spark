@@ -20,7 +20,12 @@ import org.apache.spark.annotation.{DeveloperApi, Since}
 
 /**
  * :: DeveloperApi ::
- * Stores information about an Miscellaneous Process to pass from the scheduler to SparkListeners.
+ * 存储杂项进程信息，用于从调度器传递给SparkListener。
+ * 例如用于跟踪非Executor/Driver的辅助进程信息。
+ *
+ * @param hostPort 进程的主机和端口
+ * @param cores 进程使用的CPU核心数
+ * @param logUrlInfo 日志URL信息映射
  */
 
 @DeveloperApi

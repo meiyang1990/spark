@@ -22,20 +22,19 @@ import org.apache.spark.annotation.DeveloperApi
 
 /**
  * :: DeveloperApi ::
- * Information about an [[org.apache.spark.util.AccumulatorV2]] modified during a task or stage.
+ * 在任务或Stage执行期间被修改的 [[org.apache.spark.util.AccumulatorV2]] 的信息。
  *
- * @param id accumulator ID
- * @param name accumulator name
- * @param update partial value from a task, may be None if used on driver to describe a stage
- * @param value total accumulated value so far, maybe None if used on executors to describe a task
- * @param internal whether this accumulator was internal
- * @param countFailedValues whether to count this accumulator's partial value if the task failed
- * @param metadata internal metadata associated with this accumulator, if any
+ * @param id 累加器ID
+ * @param name 累加器名称
+ * @param update 来自单个任务的部分更新值，在Driver端描述Stage时可能为None
+ * @param value 到目前为止的累积总值，在Executor端描述任务时可能为None
+ * @param internal 是否为内部累加器
+ * @param countFailedValues 如果任务失败，是否计入此累加器的部分值
+ * @param metadata 与此累加器关联的内部元数据（如果有）
  *
- * @note Once this is JSON serialized the types of `update` and `value` will be lost and be
- * cast to strings. This is because the user can define an accumulator of any type and it will
- * be difficult to preserve the type in consumers of the event log. This does not apply to
- * internal accumulators that represent task level metrics.
+ * @note 一旦进行JSON序列化，`update`和`value`的类型信息将丢失并被转换为字符串。
+ * 这是因为用户可以定义任意类型的累加器，在事件日志的消费者中很难保留其类型信息。
+ * 此限制不适用于表示任务级别度量指标的内部累加器。
  */
 @DeveloperApi
 case class AccumulableInfo private[spark] (

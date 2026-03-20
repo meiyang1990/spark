@@ -24,25 +24,20 @@ import org.apache.spark.resource.{ResourceAmountUtils, ResourceProfile}
 import org.apache.spark.resource.ResourceAmountUtils.ONE_ENTIRE_RESOURCE
 
 /**
- * Class to hold information about a series of resources belonging to an executor.
- * A resource could be a GPU, FPGA, etc. And it is used as a temporary
- * class to calculate the resources amounts when offering resources to
- * the tasks in the [[TaskSchedulerImpl]]
+ * 保存Executor上一系列资源信息的类。资源可以是GPU、FPGA等。
+ * 在 [[TaskSchedulerImpl]] 向任务提供资源时，用作计算资源分配量的临时类。
  *
- * One example is GPUs, where the addresses would be the indices of the GPUs
+ * 以GPU为例，addresses为GPU的设备索引。
  *
- * @param resources The executor available resources and amount. eg,
- *                  Map("gpu" -> Map("0" -> ResourceAmountUtils.toInternalResource(0.2),
- *                                   "1" -> ResourceAmountUtils.toInternalResource(1.0)),
- *                  "fpga" -> Map("a" -> ResourceAmountUtils.toInternalResource(0.3),
- *                                "b" -> ResourceAmountUtils.toInternalResource(0.9))
- *                  )
+ * @param resources Executor可用的资源及数量。例如：
+ *                  Map("gpu" -> Map("0" -> 内部表示的0.2, "1" -> 内部表示的1.0),
+ *                      "fpga" -> Map("a" -> 内部表示的0.3, "b" -> 内部表示的0.9))
  */
 private[spark] class ExecutorResourcesAmounts(
     private val resources: Map[String, Map[String, Long]]) extends Serializable {
 
   /**
-   * convert the resources to be mutable HashMap
+   * 将资源转换为可变HashMap，以便动态分配和释放。
    */
   private val internalResources: Map[String, HashMap[String, Long]] = {
     resources.map { case (rName, addressAmounts) =>
@@ -51,20 +46,15 @@ private[spark] class ExecutorResourcesAmounts(
   }
 
   /**
-   * The total address count of each resource. Eg,
-   * Map("gpu" -> Map("0" -> ResourceAmountUtils.toInternalResource(0.5),
-   *                  "1" -> ResourceAmountUtils.toInternalResource(0.5),
-   *                  "2" -> ResourceAmountUtils.toInternalResource(0.5)),
-   *     "fpga" -> Map("a" -> ResourceAmountUtils.toInternalResource(0.5),
-   *                   "b" -> ResourceAmountUtils.toInternalResource(0.5)))
-   * the resourceAmount will be Map("gpu" -> 3, "fpga" -> 2)
+   * 每种资源的地址总数。例如，如果gpu有3个地址、fpga有2个地址，
+   * 则返回 Map("gpu" -> 3, "fpga" -> 2)。
    */
   lazy val resourceAddressAmount: Map[String, Int] = internalResources.map {
     case (rName, addressMap) => rName -> addressMap.size
   }
 
   /**
-   * For testing purpose. convert internal resources back to the "fraction" resources.
+   * 测试用途。将内部资源表示转换回分数形式的资源量。
    */
   private[spark] def availableResources: Map[String, Map[String, Double]] = {
     internalResources.map { case (rName, addressMap) =>
@@ -75,8 +65,8 @@ private[spark] class ExecutorResourcesAmounts(
   }
 
   /**
-   * Acquire the resource.
-   * @param assignedResource the assigned resource information
+   * 获取（占用）资源。从可用资源池中扣减指定量。
+   * @param assignedResource 要分配的资源信息
    */
   def acquire(assignedResource: Map[String, Map[String, Long]]): Unit = {
     assignedResource.foreach { case (rName, taskResAmounts) =>
@@ -99,8 +89,8 @@ private[spark] class ExecutorResourcesAmounts(
   }
 
   /**
-   * Release the assigned resources to the resource pool
-   * @param assignedResource resource to be released
+   * 将已分配的资源释放回资源池。
+   * @param assignedResource 要释放的资源
    */
   def release(assignedResource: Map[String, Map[String, Long]]): Unit = {
     assignedResource.foreach { case (rName, taskResAmounts) =>
@@ -122,23 +112,16 @@ private[spark] class ExecutorResourcesAmounts(
   }
 
   /**
-   * Try to assign the addresses according to the task requirement. This function always goes
-   * through the available resources starting from the "small" address. If the resources amount
-   * of the address is matching the task requirement, we will assign this address to this task.
-   * Eg, assuming the available resources are {"gpu" -&gt; {"0"-&gt; 0.7, "1" -&gt; 1.0}) and the
-   * task requirement is 0.5, this function will return Some(Map("gpu" -&gt; {"0" -&gt; 0.5})).
+   * 根据任务的资源需求尝试分配地址。此函数始终从"最小"地址开始遍历可用资源，
+   * 如果某个地址的可用资源量满足任务需求，则将该地址分配给任务。
    *
-   * TODO: as we consistently allocate addresses beginning from the "small" address, it can
-   * potentially result in an undesired consequence where a portion of the resource is being wasted.
-   * Eg, assuming the available resources are {"gpu" -&gt; {"0"-&gt; 1.0, "1" -&gt; 0.5}) and the
-   * task amount requirement is 0.5, this function will return
-   * Some(Map("gpu" -&gt; {"0" -&gt; 0.5})), and the left available resource will be
-   * {"gpu" -&gt; {"0"-&gt; 0.5, "1" -&gt; 0.5}) which can't assign to the task that
-   * requires &gt; 0.5 any more.
+   * 例如：可用资源为 {"gpu" -> {"0"-> 0.7, "1" -> 1.0}}，任务需求为0.5，
+   * 返回 Some(Map("gpu" -> {"0" -> 0.5}))。
    *
-   * @param taskSetProf assign resources based on which resource profile
-   * @return the optional assigned resources amounts. returns None if any
-   *         of the task requests for resources aren't met.
+   * TODO: 由于总是从最小地址开始分配，可能导致资源碎片化浪费。
+   *
+   * @param taskSetProf 基于哪个ResourceProfile进行资源分配
+   * @return 分配的资源量（Optional）。如果任何资源需求无法满足，返回None。
    */
   def assignAddressesCustomResources(taskSetProf: ResourceProfile):
       Option[Map[String, Map[String, Long]]] = {
@@ -201,12 +184,12 @@ private[spark] class ExecutorResourcesAmounts(
 private[spark] object ExecutorResourcesAmounts {
 
   /**
-   * Create an empty ExecutorResourcesAmounts
+   * 创建一个空的ExecutorResourcesAmounts实例
    */
   def empty: ExecutorResourcesAmounts = new ExecutorResourcesAmounts(Map.empty)
 
   /**
-   * Converts executor infos to ExecutorResourcesAmounts
+   * 将Executor资源信息映射转换为ExecutorResourcesAmounts实例
    */
   def apply(executorInfos: Map[String, ExecutorResourceInfo]): ExecutorResourcesAmounts = {
     new ExecutorResourcesAmounts(

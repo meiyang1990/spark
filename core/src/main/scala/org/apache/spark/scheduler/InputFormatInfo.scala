@@ -32,7 +32,8 @@ import org.apache.spark.internal.Logging
 
 /**
  * :: DeveloperApi ::
- * Parses and holds information about inputFormat (and files) specified as a parameter.
+ * 解析并保存作为参数指定的InputFormat（及文件）信息。
+ * 用于确定输入数据的首选位置（数据本地性），以优化任务调度。
  */
 @DeveloperApi
 class InputFormatInfo(val configuration: Configuration, val inputFormatClazz: Class[_],

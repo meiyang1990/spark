@@ -21,8 +21,17 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.annotation.DeveloperApi
 
-// information about a specific split instance : handles both split instances.
-// So that we do not need to worry about the differences.
+/**
+ * :: DeveloperApi ::
+ * 特定数据分片（split）实例的信息。同时处理mapred和mapreduce两种API的分片实例，
+ * 使调用者无需关心两者的差异。
+ *
+ * @param inputFormatClazz InputFormat类
+ * @param hostLocation 分片所在主机
+ * @param path 文件路径
+ * @param length 分片大小（字节）
+ * @param underlyingSplit 底层的Hadoop分片对象
+ */
 @DeveloperApi
 class SplitInfo(
     val inputFormatClazz: Class[_],

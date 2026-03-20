@@ -23,8 +23,16 @@ import org.apache.spark.internal.LogKeys.{STAGE_ATTEMPT_ID, STAGE_ID}
 import org.apache.spark.internal.MessageWithContext
 
 /**
- * A set of tasks submitted together to the low-level TaskScheduler, usually representing
- * missing partitions of a particular stage.
+ * 一组一起提交给底层TaskScheduler的任务集合，
+ * 通常表示某个Stage中缺失的（需要计算的）分区。
+ *
+ * @param tasks 任务数组
+ * @param stageId Stage ID
+ * @param stageAttemptId Stage尝试ID
+ * @param priority 优先级（通常为作业ID，数值越小优先级越高）
+ * @param properties 调度属性
+ * @param resourceProfileId 资源配置文件ID
+ * @param shuffleId 关联的Shuffle ID（如果有）
  */
 private[spark] class TaskSet(
     val tasks: Array[Task[_]],

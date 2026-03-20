@@ -29,17 +29,8 @@ import org.apache.spark.errors.SparkCoreErrors
 @DeveloperApi
 class TaskInfo(
     val taskId: Long,
-    /**
-     * The index of this task within its task set. Not necessarily the same as the ID of the RDD
-     * partition that the task is computing.
-     */
     val index: Int,
     val attemptNumber: Int,
-    /**
-     * The actual RDD partition ID in this task.
-     * The ID of the RDD partition is always same across task attempts.
-     * This will be -1 for historical data, and available for all applications since Spark 3.3.
-     */
     val partitionId: Int,
     val launchTime: Long,
     val executorId: String,
@@ -48,8 +39,7 @@ class TaskInfo(
     val speculative: Boolean) extends Cloneable {
 
   /**
-   * This api doesn't contains partitionId, please use the new api.
-   * Remain it for backward compatibility before Spark 3.3.
+   * 不含partitionId的旧API，为Spark 3.3之前的兼容性保留。
    */
   def this(
       taskId: Long,

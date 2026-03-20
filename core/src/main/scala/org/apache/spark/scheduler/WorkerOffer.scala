@@ -20,15 +20,20 @@ package org.apache.spark.scheduler
 import org.apache.spark.resource.ResourceProfile
 
 /**
- * Represents free resources available on an executor.
+ * 表示Executor上可用的空闲资源。TaskScheduler在资源调度时使用此类来描述每个Executor的可用资源。
+ *
+ * @param executorId Executor的唯一标识
+ * @param host Executor所在主机名
+ * @param cores 可用CPU核心数
+ * @param address 可选的hostPort字符串，当同一主机上启动多个Executor时提供比host更详细的信息
+ * @param resources Executor上的自定义资源（如GPU、FPGA等）及其可用量
+ * @param resourceProfileId 资源配置文件ID
  */
 private[spark]
 case class WorkerOffer(
     executorId: String,
     host: String,
     cores: Int,
-    // `address` is an optional hostPort string, it provide more useful information than `host`
-    // when multiple executors are launched on the same host.
     address: Option[String] = None,
     resources: ExecutorResourcesAmounts = ExecutorResourcesAmounts.empty,
     resourceProfileId: Int = ResourceProfile.DEFAULT_RESOURCE_PROFILE_ID)

@@ -19,29 +19,35 @@ package org.apache.spark.scheduler
 import scala.collection.mutable.HashMap
 
 /**
- * Small helper for tracking failed tasks for exclusion purposes.  Info on all failures on one
- * executor, within one task set.
+ * 用于跟踪任务失败信息的辅助类，服务于Executor排除机制。
+ * 记录在一个TaskSet中，某个Executor上所有任务的失败信息。
+ *
+ * @param node 该Executor所在的节点主机名
  */
 private[scheduler] class ExecutorFailuresInTaskSet(val node: String) {
   /**
-   * Mapping from index of the tasks in the taskset, to the number of times it has failed on this
-   * executor and the most recent failure time.
+   * 从TaskSet中任务索引到（失败次数, 最近失败时间）的映射。
    */
   val taskToFailureCountAndFailureTime = HashMap[Int, (Int, Long)]()
 
+  /**
+   * 记录一次任务失败。
+   * @param taskIndex 失败任务在TaskSet中的索引
+   * @param failureTime 失败时间戳（来自Driver时钟）
+   */
   def updateWithFailure(taskIndex: Int, failureTime: Long): Unit = {
     val (prevFailureCount, prevFailureTime) =
       taskToFailureCountAndFailureTime.getOrElse(taskIndex, (0, -1L))
-    // these times always come from the driver, so we don't need to worry about skew, but might
-    // as well still be defensive in case there is non-monotonicity in the clock
+    // 时间戳始终来自Driver，无需担心时钟偏差，但仍做防御性处理以应对时钟非单调性
     val newFailureTime = math.max(prevFailureTime, failureTime)
     taskToFailureCountAndFailureTime(taskIndex) = (prevFailureCount + 1, newFailureTime)
   }
 
+  /** 在此Executor上失败过的不同任务数量 */
   def numUniqueTasksWithFailures: Int = taskToFailureCountAndFailureTime.size
 
   /**
-   * Return the number of times this executor has failed on the given task index.
+   * 返回此Executor在指定任务索引上的失败次数。
    */
   def getNumTaskFailures(index: Int): Int = {
     taskToFailureCountAndFailureTime.getOrElse(index, (0, 0))._1

@@ -22,10 +22,9 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.util.CallSite
 
 /**
- * ResultStages apply a function on some partitions of an RDD to compute the result of an action.
- * The ResultStage object captures the function to execute, `func`, which will be applied to each
- * partition, and the set of partition IDs, `partitions`. Some stages may not run on all partitions
- * of the RDD, for actions like first() and lookup().
+ * ResultStage（结果Stage）在RDD的某些分区上应用函数来计算action的结果。
+ * 此类捕获要执行的函数`func`（应用于每个分区）和分区ID集合`partitions`。
+ * 对于first()和lookup()等action，某些Stage可能不会在RDD的所有分区上运行。
  */
 private[spark] class ResultStage(
     id: Int,
@@ -39,25 +38,25 @@ private[spark] class ResultStage(
   extends Stage(id, rdd, partitions.length, parents, firstJobId, callSite, resourceProfileId) {
 
   /**
-   * The active job for this result stage. Will be empty if the job has already finished
-   * (e.g., because the job was cancelled).
+   * 此ResultStage的活跃作业。如果作业已完成（例如被取消），则为空。
    */
   private[this] var _activeJob: Option[ActiveJob] = None
 
   def activeJob: Option[ActiveJob] = _activeJob
 
+  /** 设置活跃作业 */
   def setActiveJob(job: ActiveJob): Unit = {
     _activeJob = Option(job)
   }
 
+  /** 移除活跃作业 */
   def removeActiveJob(): Unit = {
     _activeJob = None
   }
 
   /**
-   * Returns the sequence of partition ids that are missing (i.e. needs to be computed).
-   *
-   * This can only be called when there is an active job.
+   * 返回缺失的（即需要计算的）分区ID序列。
+   * 仅在有活跃作业时才能调用。
    */
   override def findMissingPartitions(): Seq[Int] = {
     val job = activeJob.get

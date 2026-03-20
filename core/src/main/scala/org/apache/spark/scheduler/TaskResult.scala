@@ -92,11 +92,9 @@ private[spark] class DirectTaskResult[T](
   }
 
   /**
-   * When `value()` is called at the first time, it needs to deserialize `valueObject` from
-   * `valueBytes`. It may cost dozens of seconds for a large instance. So when calling `value` at
-   * the first time, the caller should avoid to block other threads.
-   *
-   * After the first time, `value()` is trivial and just returns the deserialized `valueObject`.
+   * 获取反序列化后的结果值。首次调用时需要从valueBytes反序列化valueObject，
+   * 对于大实例可能需要数十秒。因此首次调用时，调用者应避免阻塞其他线程。
+   * 后续调用直接返回已反序列化的valueObject，开销很小。
    */
   def value(resultSer: SerializerInstance = null): T = {
     if (valueObjectDeserialized) {

@@ -25,7 +25,8 @@ import org.apache.spark.storage.RDDInfo
 
 /**
  * :: DeveloperApi ::
- * Stores information about a stage to pass from the scheduler to SparkListeners.
+ * 存储Stage的信息，用于从调度器传递给SparkListener。
+ * 包含Stage的ID、名称、任务数、RDD信息、父Stage、提交/完成时间等。
  */
 @DeveloperApi
 class StageInfo(
@@ -42,16 +43,15 @@ class StageInfo(
     val resourceProfileId: Int,
     private[spark] var isShufflePushEnabled: Boolean = false,
     private[spark] var shuffleMergerCount: Int = 0) {
-  /** When this stage was submitted from the DAGScheduler to a TaskScheduler. */
+  /** Stage从DAGScheduler提交到TaskScheduler的时间 */
   var submissionTime: Option[Long] = None
-  /** Time when the stage completed or when the stage was cancelled. */
+  /** Stage完成或被取消的时间 */
   var completionTime: Option[Long] = None
-  /** If the stage failed, the reason why. */
+  /** 如果Stage失败，记录失败原因 */
   var failureReason: Option[String] = None
 
   /**
-   * Terminal values of accumulables updated during this stage, including all the user-defined
-   * accumulators.
+   * 此Stage期间更新的累加器最终值，包括所有用户定义的累加器。
    */
   val accumulables = HashMap[Long, AccumulableInfo]()
 
@@ -87,11 +87,10 @@ class StageInfo(
 
 private[spark] object StageInfo {
   /**
-   * Construct a StageInfo from a Stage.
+   * 从Stage构造StageInfo。
    *
-   * Each Stage is associated with one or many RDDs, with the boundary of a Stage marked by
-   * shuffle dependencies. Therefore, all ancestor RDDs related to this Stage's RDD through a
-   * sequence of narrow dependencies should also be associated with this Stage.
+   * 每个Stage关联一个或多个RDD，Stage的边界由Shuffle依赖标记。
+   * 因此，通过窄依赖链与此Stage的RDD相关的所有祖先RDD也应关联到此Stage。
    */
   def fromStage(
       stage: Stage,

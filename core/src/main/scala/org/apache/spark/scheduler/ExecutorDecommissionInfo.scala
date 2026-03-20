@@ -18,23 +18,22 @@
 package org.apache.spark.scheduler
 
 /**
- * Message providing more detail when an executor is being decommissioned.
- * @param message Human readable reason for why the decommissioning is happening.
- * @param workerHost When workerHost is defined, it means the host (aka the `node` or `worker`
- *                in other places) has been decommissioned too. Used to infer if the
- *                shuffle data might be lost even if the external shuffle service is enabled.
+ * Executor被下线（decommission）时提供详细信息的消息。
+ * @param message 人类可读的下线原因说明
+ * @param workerHost 如果定义了workerHost，表示该主机（即其他地方所说的`node`或`worker`）
+ *                   也被下线了。用于判断即使启用了外部Shuffle服务，Shuffle数据是否可能丢失。
  */
 private[spark]
 case class ExecutorDecommissionInfo(message: String, workerHost: Option[String] = None)
 
 /**
- * State related to decommissioning that is kept by the TaskSchedulerImpl. This state is derived
- * from the info message above but it is kept distinct to allow the state to evolve independently
- * from the message.
+ * TaskSchedulerImpl维护的与Executor下线相关的状态。
+ * 此状态从上面的信息消息派生，但保持独立以便状态可以独立于消息进行演化。
+ *
+ * @param startTime 按Driver时钟记录的下线开始时间戳，
+ *                  用于在配置了EXECUTOR_DECOMMISSION_KILL_INTERVAL时估算Executor最终丢失的时间
+ * @param workerHost 被下线的Worker主机名（如果主机也被下线）
  */
 private[scheduler] case class ExecutorDecommissionState(
-    // Timestamp the decommissioning commenced as per the Driver's clock,
-    // to estimate when the executor might eventually be lost if EXECUTOR_DECOMMISSION_KILL_INTERVAL
-    // is configured.
     startTime: Long,
     workerHost: Option[String] = None)
