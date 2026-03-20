@@ -1,3 +1,4 @@
+// 这个文件已经全部加上中文注释
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -65,15 +66,18 @@ import org.apache.spark.util._
 import org.apache.spark.util.ArrayImplicits._
 import org.apache.spark.util.io.ChunkedByteBuffer
 
-/* Class for returning a fetched block and associated metrics. */
+/**
+ * 返回获取的数据块及其相关指标的封装类。
+ * 用于从 BlockManager 获取数据时返回数据迭代器、读取方式和字节数。
+ */
 private[spark] class BlockResult(
-    val data: Iterator[Any],
-    val readMethod: DataReadMethod.Value,
-    val bytes: Long)
+    val data: Iterator[Any],        // 数据块的迭代器
+    val readMethod: DataReadMethod.Value,  // 读取方式（内存/磁盘/网络）
+    val bytes: Long)                 // 数据块大小（字节）
 
 /**
- * Abstracts away how blocks are stored and provides different ways to read the underlying block
- * data. Callers should call [[BlockData#dispose()]] when they're done with the block.
+ * 数据块存储的抽象接口，提供多种方式读取底层数据块。
+ * 调用者使用完毕后应调用 [[BlockData#dispose()]] 释放资源。
  */
 private[spark] trait BlockData {
 
@@ -174,10 +178,29 @@ private[spark] class HostLocalDirManager(
 }
 
 /**
- * Manager running on every node (driver and executors) which provides interfaces for putting and
- * retrieving blocks both locally and remotely into various stores (memory, disk, and off-heap).
+ * 块管理器（BlockManager）- 运行在每个节点（Driver 和 Executor）上的核心组件。
+ * 
+ * 主要职责：
+ *   1. 提供本地和远程块数据的存储和检索接口
+ *   2. 支持多种存储介质：内存（堆内/堆外）、磁盘
+ *   3. 管理数据块的复制、迁移和清理
+ *   4. 与 BlockManagerMaster 通信，维护集群中所有块的位置信息
+ *   5. 支持 Shuffle 数据的读写
+ *   6. 支持 RDD 缓存和广播变量存储
+ * 
+ * 注意：必须先调用 [[initialize()]] 方法才能使用 BlockManager。
  *
- * Note that [[initialize()]] must be called before the BlockManager is usable.
+ * @param executorId 执行器 ID（Driver 使用 "driver"）
+ * @param rpcEnv RPC 环境，用于节点间通信
+ * @param master BlockManagerMaster，用于与 Driver 上的主节点通信
+ * @param serializerManager 序列化管理器
+ * @param conf Spark 配置
+ * @param _memoryManager 内存管理器，负责内存的分配和回收
+ * @param mapOutputTracker Map 输出追踪器，用于获取 Shuffle 数据位置
+ * @param _shuffleManager Shuffle 管理器
+ * @param blockTransferService 块传输服务，用于节点间数据传输
+ * @param securityManager 安全管理器
+ * @param externalBlockStoreClient 外部 Shuffle 服务客户端（可选）
  */
 private[spark] class BlockManager(
     val executorId: String,
@@ -193,107 +216,109 @@ private[spark] class BlockManager(
     externalBlockStoreClient: Option[ExternalBlockStoreClient])
   extends BlockDataManager with BlockEvictionHandler with Logging {
 
-  // We initialize the ShuffleManager later in SparkContext and Executor, to allow
-  // user jars to define custom ShuffleManagers, as such `_shuffleManager` will be null here
-  // (except for tests) and we ask for the instance from the SparkEnv.
+  // ShuffleManager 延迟初始化，允许用户自定义 ShuffleManager 类
+  // 在 SparkContext 和 Executor 中初始化，此处可能为 null
   private lazy val shuffleManager = {
     Option(_shuffleManager).getOrElse {
-      // Wait for ShuffleManager to be initialized before handling shuffle operations.
-      // Exception will be thrown if it is not initialized within the configured timeout.
+      // 等待 ShuffleManager 初始化完成后再处理 Shuffle 操作
+      // 如果在配置的超时时间内未初始化，将抛出异常
       waitForShuffleManagerInit()
       SparkEnv.get.shuffleManager
     }
   }
 
-  // Similarly, we also initialize MemoryManager later after DriverPlugin is loaded, to
-  // allow the plugin to overwrite certain memory configurations. The `_memoryManager` will be
-  // null here and we ask for the instance from SparkEnv
+  // 内存管理器也延迟初始化，在 DriverPlugin 加载后进行
+  // 允许插件覆盖某些内存配置
   private[spark] lazy val memoryManager =
     Option(_memoryManager).getOrElse(SparkEnv.get.memoryManager)
 
-  // same as `conf.get(config.SHUFFLE_SERVICE_ENABLED)`
+  // 是否启用外部 Shuffle 服务
   private[spark] val externalShuffleServiceEnabled: Boolean = externalBlockStoreClient.isDefined
+  // 判断当前节点是否为 Driver
   private val isDriver = executorId == SparkContext.DRIVER_IDENTIFIER
 
+  // 远程读取时是否将 NIO Buffer 转换为堆内存
   private val remoteReadNioBufferConversion =
     conf.get(Network.NETWORK_REMOTE_READ_NIO_BUFFER_CONVERSION)
 
+  // 每个本地目录下的子目录数量，用于分散存储负载
   private[spark] val subDirsPerLocalDir = conf.get(config.DISKSTORE_SUB_DIRECTORIES)
 
+  // 磁盘块管理器，负责磁盘文件的创建和管理
   val diskBlockManager = {
-    // Only perform cleanup if an external service is not serving our shuffle files.
+    // 只有在没有外部服务管理 Shuffle 文件时才执行清理
     val deleteFilesOnStop =
       !externalShuffleServiceEnabled || isDriver
     new DiskBlockManager(conf, deleteFilesOnStop = deleteFilesOnStop, isDriver = isDriver)
   }
 
-  /** Whether rdd cache visibility tracking is enabled. */
+  // 是否启用 RDD 缓存可见性追踪
   private val trackingCacheVisibility: Boolean = conf.get(RDD_CACHE_VISIBILITY_TRACKING_ENABLED)
 
-  // Visible for testing
+  // 块信息管理器，维护所有块的元数据和锁信息
   private[storage] val blockInfoManager = new BlockInfoManager(trackingCacheVisibility)
 
+  // 用于执行异步操作的线程池
   private val futureExecutionContext = ExecutionContext.fromExecutorService(
     ThreadUtils.newDaemonCachedThreadPool("block-manager-future", 128))
 
-  // Actual storage of where blocks are kept
+  // 内存存储，负责将数据块缓存在 JVM 堆内存或堆外内存中
   private[spark] lazy val memoryStore = {
     val store = new MemoryStore(conf, blockInfoManager, serializerManager, memoryManager, this)
     memoryManager.setMemoryStore(store)
     store
   }
+  // 磁盘存储，负责将数据块持久化到本地磁盘
   private[spark] val diskStore = new DiskStore(conf, diskBlockManager, securityManager)
 
-  // Note: depending on the memory manager, `maxMemory` may actually vary over time.
-  // However, since we use this only for reporting and logging, what we actually want here is
-  // the absolute maximum value that `maxMemory` can ever possibly reach. We may need
-  // to revisit whether reporting this value as the "max" is intuitive to the user.
+  // 最大堆内存储内存大小（用于日志和报告）
   private lazy val maxOnHeapMemory = memoryManager.maxOnHeapStorageMemory
+  // 最大堆外存储内存大小
   private lazy val maxOffHeapMemory = memoryManager.maxOffHeapStorageMemory
 
+  // 外部 Shuffle 服务端口
   private[spark] val externalShuffleServicePort = StorageUtils.externalShuffleServicePort(conf)
 
+  // 当前 BlockManager 的唯一标识
   var blockManagerId: BlockManagerId = _
 
-  // Address of the server that serves this executor's shuffle files. This is either an external
-  // service, or just our own Executor's BlockManager.
+  // 提供 Shuffle 文件服务的地址（可能是外部服务或本地 BlockManager）
   private[spark] var shuffleServerId: BlockManagerId = _
 
-  // Client to read other executors' blocks. This is either an external service, or just the
-  // standard BlockTransferService to directly connect to other Executors.
+  // 用于读取其他 Executor 数据块的客户端
+  // 可以是外部 Shuffle 服务客户端或标准的 BlockTransferService
   private[spark] val blockStoreClient = externalBlockStoreClient.getOrElse(blockTransferService)
 
-  // Max number of failures before this block manager refreshes the block locations from the driver
+  // 从 Driver 刷新块位置信息前的最大失败次数
   private val maxFailuresBeforeLocationRefresh =
     conf.get(config.BLOCK_FAILURES_BEFORE_LOCATION_REFRESH)
 
+  // 块管理器的 RPC 端点
   private val storageEndpoint = rpcEnv.setupEndpoint(
     "BlockManagerEndpoint" + BlockManager.ID_GENERATOR.next,
     new BlockManagerStorageEndpoint(rpcEnv, this, mapOutputTracker))
 
-  // Pending re-registration action being executed asynchronously or null if none is pending.
-  // Accesses should synchronize on asyncReregisterLock.
+  // 异步重新注册任务及其同步锁
   private var asyncReregisterTask: Future[Unit] = null
   private val asyncReregisterLock = new Object
 
-  // Field related to peer block managers that are necessary for block replication
+  // 对等节点 BlockManager 相关字段，用于块复制
   @volatile private var cachedPeers: Seq[BlockManagerId] = _
   private val peerFetchLock = new Object
   private var lastPeerFetchTimeNs = 0L
 
+  // 块复制策略
   private var blockReplicationPolicy: BlockReplicationPolicy = _
 
-  // visible for test
-  // This is volatile since if it's defined we should not accept remote blocks.
+  // 节点退役管理器（如果定义则不接受远程块）
   @volatile private[spark] var decommissioner: Option[BlockManagerDecommissioner] = None
 
-  // A DownloadFileManager used to track all the files of remote blocks which are above the
-  // specified memory threshold. Files will be deleted automatically based on weak reference.
-  // Exposed for test
+  // 远程块临时文件管理器，基于弱引用自动清理超过内存阈值的远程块文件
   private[storage] val remoteBlockTempFileManager =
     new BlockManager.RemoteBlockDownloadFileManager(
       this,
       securityManager.getIOEncryptionKey())
+  // 直接读取到内存的远程块最大大小
   private val maxRemoteBlockToMem = conf.get(config.MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM)
 
   var hostLocalDirManager: Option[HostLocalDirManager] = None
@@ -558,17 +583,26 @@ private[spark] class BlockManager(
   /**
    * Initializes the BlockManager with the given appId. This is not performed in the constructor as
    * the appId may not be known at BlockManager instantiation time (in particular for the driver,
-   * where it is only learned after registration with the TaskScheduler).
+   * 初始化 BlockManager，在 SparkContext 或 Executor 初始化时调用。
+   * 
+   * 初始化流程：
+   *   1. 初始化 BlockTransferService（块传输服务）
+   *   2. 初始化外部块存储客户端（如果配置）
+   *   3. 创建块复制策略
+   *   4. 如果启用外部 Shuffle 服务，向其注册
+   *   5. 向 BlockManagerMaster（Driver 上的主节点）注册
+   *   6. 初始化本地目录管理器（用于 Shuffle 数据本地读取）
    *
-   * This method initializes the BlockTransferService and BlockStoreClient, registers with the
-   * BlockManagerMaster, starts the BlockManagerWorker endpoint, and registers with a local shuffle
-   * service if configured.
+   * @param appId 应用程序 ID（可能在 TaskScheduler 注册后才能获取）
    */
   def initialize(appId: String): Unit = {
+    // 初始化块传输服务
     blockTransferService.init(this)
+    // 初始化外部块存储客户端（用于外部 Shuffle 服务）
     externalBlockStoreClient.foreach { blockStoreClient =>
       blockStoreClient.init(appId)
     }
+    // 创建块复制策略实例
     blockReplicationPolicy = {
       val priorityClass = conf.get(config.STORAGE_REPLICATION_POLICY)
       val clazz = Utils.classForName(priorityClass)
@@ -577,13 +611,9 @@ private[spark] class BlockManager(
       ret
     }
 
-    // Register Executors' configuration with the local shuffle service, if one should exist.
-    // Registration with the ESS should happen before registering the block manager with the
-    // BlockManagerMaster. In push-based shuffle, the registered BM is selected by the driver
-    // as a merger. However, for the ESS on this host to be able to merge blocks successfully,
-    // it needs the merge directories metadata which is provided by the local executor during
-    // the registration with the ESS. Therefore, this registration should be prior to
-    // the BlockManager registration. See SPARK-39647.
+    // 向本地外部 Shuffle 服务注册 Executor 配置
+    // 必须在向 BlockManagerMaster 注册之前完成，因为在 push-based shuffle 中，
+    // Driver 会选择已注册的 BM 作为合并节点
     if (externalShuffleServiceEnabled) {
       logInfo(log"external shuffle service port = ${MDC(PORT, externalShuffleServicePort)}")
       shuffleServerId = BlockManagerId(executorId, blockTransferService.hostName,
@@ -593,11 +623,11 @@ private[spark] class BlockManager(
       }
     }
 
+    // 创建 BlockManagerId
     val id =
       BlockManagerId(executorId, blockTransferService.hostName, blockTransferService.port, None)
 
-    // The idFromMaster has just additional topology information. Otherwise, it has the same
-    // executor id/host/port of idWithoutTopologyInfo which is not expected to be changed.
+    // 向 BlockManagerMaster 注册，返回的 ID 包含拓扑信息
     val idFromMaster = master.registerBlockManager(
       id,
       diskBlockManager.localDirsString,
@@ -611,6 +641,7 @@ private[spark] class BlockManager(
       shuffleServerId = blockManagerId
     }
 
+    // 初始化本地目录管理器（用于 Shuffle 数据本地读取优化）
     hostLocalDirManager = {
       if ((conf.get(config.SHUFFLE_HOST_LOCAL_DISK_READING_ENABLED) &&
           !conf.get(config.SHUFFLE_USE_OLD_FETCH_PROTOCOL)) ||
