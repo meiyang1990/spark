@@ -278,8 +278,8 @@ private[spark] class LiveListenerBusMetrics(conf: SparkConf)
   private val perListenerClassTimers = mutable.Map[String, Timer]()
 
   /**
-   * Returns a timer tracking the processing time of the given listener class.
-   * events processed by that listener. This method is thread-safe.
+   * 返回跟踪给定监听器类处理时间的计时器。
+   * 该监听器处理的事件。此方法是线程安全的。
    */
   def getTimerForListenerClass(cls: Class[_ <: SparkListenerInterface]): Option[Timer] = {
     synchronized {

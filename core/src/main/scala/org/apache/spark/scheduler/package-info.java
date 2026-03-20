@@ -16,6 +16,6 @@
  */
 
 /**
- * Spark's DAG scheduler.
+ * Spark的DAG调度器。
  */
 package org.apache.spark.scheduler;

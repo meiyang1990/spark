@@ -198,14 +198,14 @@ private[spark] abstract class Task[T](
   def reasonIfKilled: Option[String] = Option(_reasonIfKilled)
 
   /**
-   * Returns the amount of time spent deserializing the RDD and function to be run.
+   * 返回反序列化RDD和待运行函数所花费的时间。
    */
   def executorDeserializeTimeNs: Long = _executorDeserializeTimeNs
   def executorDeserializeCpuTime: Long = _executorDeserializeCpuTime
 
   /**
-   * Collect the latest values of accumulators used in this task. If the task failed,
-   * filter out the accumulators whose values should not be included on failures.
+   * 收集此任务中使用的最新累加器值。如果任务失败，
+   * 过滤掉不应包含在失败情况下的累加器。
    */
   def collectAccumulatorUpdates(taskFailed: Boolean = false): Seq[AccumulatorV2[_, _]] = {
     if (context != null) {

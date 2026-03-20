@@ -710,8 +710,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   }
 
   /**
-   * Called by subclasses when notified of a lost worker. It just fires the message and returns
-   * at once.
+   * 当子类收到Worker丢失通知时调用。它仅触发消息并立即返回。
    */
   protected def removeExecutor(executorId: String, reason: ExecutorLossReason): Unit = {
     driverEndpoint.send(RemoveExecutor(executorId, reason))

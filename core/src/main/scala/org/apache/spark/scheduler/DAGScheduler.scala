@@ -698,17 +698,16 @@ private[spark] class DAGScheduler(
   }
 
   /**
-   * Returns shuffle dependencies that are immediate parents of the given RDD and the
-   * ResourceProfiles associated with the RDDs for this stage.
+   * 返回给定RDD的直接父Shuffle依赖以及与此Stage关联的RDD的ResourceProfile。
    *
-   * This function will not return more distant ancestors for shuffle dependencies. For example,
-   * if C has a shuffle dependency on B which has a shuffle dependency on A:
+   * 此函数不会返回更远祖先的Shuffle依赖。例如，
+   * 如果C对B有Shuffle依赖，B对A有Shuffle依赖：
    *
    * A <-- B <-- C
    *
-   * calling this function with rdd C will only return the B <-- C dependency.
+   * 使用rdd C调用此函数将仅返回B <-- C依赖。
    *
-   * This function is scheduler-visible for the purpose of unit testing.
+   * 此函数对调度器可见，用于单元测试。
    */
   private[scheduler] def getShuffleDependenciesAndResourceProfiles(
       rdd: RDD[_]): (HashSet[ShuffleDependency[_, _, _]], HashSet[ResourceProfile]) = {

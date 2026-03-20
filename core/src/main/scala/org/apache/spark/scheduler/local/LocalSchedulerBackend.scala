@@ -43,9 +43,9 @@ private case class KillTask(taskId: Long, interruptThread: Boolean, reason: Stri
 private case class StopExecutor()
 
 /**
- * Calls to [[LocalSchedulerBackend]] are all serialized through LocalEndpoint. Using an
- * RpcEndpoint makes the calls on [[LocalSchedulerBackend]] asynchronous, which is necessary
- * to prevent deadlock between [[LocalSchedulerBackend]] and the [[TaskSchedulerImpl]].
+ * 对[[LocalSchedulerBackend]]的调用都通过LocalEndpoint序列化。
+ * 使用RpcEndpoint使得对[[LocalSchedulerBackend]]的调用变为异步，这对于防止
+ * [[LocalSchedulerBackend]]与[[TaskSchedulerImpl]]之间的死锁是必要的。
  */
 private[spark] class LocalEndpoint(
     override val rpcEnv: RpcEnv,
@@ -100,9 +100,8 @@ private[spark] class LocalEndpoint(
 }
 
 /**
- * Used when running a local version of Spark where the executor, backend, and master all run in
- * the same JVM. It sits behind a [[TaskSchedulerImpl]] and handles launching tasks on a single
- * Executor (created by the [[LocalSchedulerBackend]]) running locally.
+ * 用于运行本地版本Spark，其中Executor、后端和Master都运行在同一个JVM中。
+ * 它位于[[TaskSchedulerImpl]]之后，负责在本地运行的单个Executor（由[[LocalSchedulerBackend]]创建）上启动任务。
  */
 private[spark] class LocalSchedulerBackend(
     conf: SparkConf,
@@ -120,9 +119,9 @@ private[spark] class LocalSchedulerBackend(
   }
 
   /**
-   * Returns a list of URLs representing the user classpath.
+   * 返回表示用户类路径的URL列表。
    *
-   * @param conf Spark configuration.
+   * @param conf Spark配置
    */
   def getUserClasspath(conf: SparkConf): Seq[URL] = {
     val userClassPathStr = conf.get(config.EXECUTOR_CLASS_PATH)

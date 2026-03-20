@@ -1,0 +1,19 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-03-20T03:38:46.995Z
+provider: 
+---
+
+# 添加完成标记注释
+
+当使用 read_code_and_generate_comment 技能对某个文件处理完毕后，在该文件的最前面加上一行注释，注释的文字是：
+
+```
+// 这个文件已经全部加上中文注释
+```
+
+如果是 Scala 或 Java 文件，使用 `//` 注释；如果是其他语言，使用对应的单行注释语法。
+
+此标记用于标识该文件已经完成中文注释添加，避免重复处理。

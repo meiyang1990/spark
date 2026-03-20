@@ -1,0 +1,19 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-03-20T03:38:55.894Z
+provider: 
+---
+
+# 跳过已注释文件
+
+当使用 read_code_and_generate_comment 技能处理文件时，首先检查文件内容开头是否包含以下标记注释：
+
+```
+// 这个文件已经全部加上中文注释
+```
+
+如果发现该标记，则跳过此文件，不进行重复的中文注释添加。
+
+该规则与 `add-completion-marker` 规则配合使用，确保每个文件只被处理一次。

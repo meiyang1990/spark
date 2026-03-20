@@ -33,7 +33,7 @@ import org.apache.spark.storage.{RDDBlockId, ShuffleDataBlockId}
 import org.apache.spark.util.Clock
 
 /**
- * A monitor for executor activity, used by ExecutorAllocationManager to detect idle executors.
+ * Executor活动监控器，用于ExecutorAllocationManager检测空闲Executor。
  */
 private[spark] class ExecutorMonitor(
     conf: SparkConf,
@@ -103,8 +103,8 @@ private[spark] class ExecutorMonitor(
   }
 
   /**
-   * Returns the list of executors and their ResourceProfile id that are currently considered to
-   * be timed out. Should only be called from the EAM thread.
+   * 返回当前被认为已超时的Executor列表及其ResourceProfile ID。
+   * 仅应在EAM线程中调用。
    */
   def timedOutExecutors(): Seq[(String, Int)] = {
     val now = clock.nanoTime()
@@ -138,8 +138,8 @@ private[spark] class ExecutorMonitor(
   }
 
   /**
-   * Mark the given executors as pending to be removed. Should only be called in the EAM thread.
-   * This covers both kills and decommissions.
+   * 标记给定的Executor为待移除状态。仅应在EAM线程中调用。
+   * 此操作涵盖kill和decommission两种情形。
    */
   def executorsKilled(ids: Seq[String]): Unit = {
     ids.foreach { id =>
@@ -489,9 +489,9 @@ private[spark] class ExecutorMonitor(
   }
 
   /**
-   * This method should be used when updating executor state. It guards against a race condition in
-   * which the `SparkListenerTaskStart` event is posted before the `SparkListenerBlockManagerAdded`
-   * event, which is possible because these events are posted in different threads. (see SPARK-4951)
+   * 更新Executor状态时应使用此方法。它防止一种竞态条件：
+   * `SparkListenerTaskStart`事件在`SparkListenerBlockManagerAdded`事件之前发布，
+   * 这可能发生因为这些事件在不同线程中发布。（参见SPARK-4951）
    */
   // Visible for testing.
   private[scheduler] def ensureExecutorIsTracked(

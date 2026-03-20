@@ -176,11 +176,10 @@ private[scheduler] class TaskSetExcludelist(
 private[scheduler] object TaskSetExcludelist {
 
   /**
-   * Returns true if the excludeOnFailure is enabled on the task/stage level,
-   * based on checking the configuration in the following order:
-   * 1. Is taskset level exclusion specifically enabled or disabled?
-   * 2. Is overall exclusion feature enabled or disabled?
-   * 3. Default is off
+   * 如果基于以下顺序检查配置，在任务/Stage级别启用了excludeOnFailure，则返回true：
+   * 1. TaskSet级别的排除是否显式启用或禁用？
+   * 2. 整体排除功能是否启用或禁用？
+   * 3. 默认关闭
    */
   def isExcludeOnFailureEnabled(conf: SparkConf): Boolean = {
     conf.get(config.EXCLUDE_ON_FAILURE_ENABLED_TASK_AND_STAGE)
