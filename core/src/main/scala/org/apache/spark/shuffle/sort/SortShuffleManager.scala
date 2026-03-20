@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle.sort
 
 import java.util.concurrent.ConcurrentHashMap
@@ -28,54 +30,49 @@ import org.apache.spark.shuffle.api.ShuffleExecutorComponents
 import org.apache.spark.util.collection.OpenHashSet
 
 /**
- * In sort-based shuffle, incoming records are sorted according to their target partition ids, then
- * written to a single map output file. Reducers fetch contiguous regions of this file in order to
- * read their portion of the map output. In cases where the map output data is too large to fit in
- * memory, sorted subsets of the output can be spilled to disk and those on-disk files are merged
- * to produce the final output file.
+ * 基于 Sort 的 Shuffle 实现。
  *
- * Sort-based shuffle has two different write paths for producing its map output files:
+ * 在 Sort-based Shuffle 中，输入记录根据目标分区 ID 排序，然后写入单个 Map 输出文件。
+ * Reducer 通过获取该文件的连续区域来读取其 Map 输出部分。
+ * 当 Map 输出数据过大无法放入内存时，已排序的输出子集可以溢写到磁盘，
+ * 这些磁盘文件会被合并以生成最终输出文件。
  *
- *  - Serialized sorting: used when all three of the following conditions hold:
- *    1. The shuffle dependency specifies no map-side combine.
- *    2. The shuffle serializer supports relocation of serialized values (this is currently
- *       supported by KryoSerializer and Spark SQL's custom serializers).
- *    3. The shuffle produces fewer than or equal to 16777216 output partitions.
- *  - Deserialized sorting: used to handle all other cases.
+ * Sort-based Shuffle 有两种不同的写入路径来生成 Map 输出文件：
+ *
+ *  - 序列化排序（Serialized sorting）：当以下三个条件全部满足时使用：
+ *    1. Shuffle 依赖未指定 Map 端聚合
+ *    2. Shuffle 序列化器支持序列化值的重定位（目前 KryoSerializer 和 Spark SQL 的自定义序列化器支持）
+ *    3. Shuffle 产生的输出分区数小于等于 16777216
+ *  - 反序列化排序（Deserialized sorting）：用于处理其他所有情况
  *
  * -----------------------
- * Serialized sorting mode
+ * 序列化排序模式
  * -----------------------
  *
- * In the serialized sorting mode, incoming records are serialized as soon as they are passed to the
- * shuffle writer and are buffered in a serialized form during sorting. This write path implements
- * several optimizations:
+ * 在序列化排序模式下，输入记录一旦传递给 Shuffle Writer 就被序列化，并在排序期间以序列化形式缓冲。
+ * 此写入路径实现了多项优化：
  *
- *  - Its sort operates on serialized binary data rather than Java objects, which reduces memory
- *    consumption and GC overheads. This optimization requires the record serializer to have certain
- *    properties to allow serialized records to be re-ordered without requiring deserialization.
- *    See SPARK-4550, where this optimization was first proposed and implemented, for more details.
+ *  - 排序操作在序列化的二进制数据上进行，而非 Java 对象，这减少了内存消耗和 GC 开销。
+ *    此优化要求记录序列化器具有某些特性，允许序列化记录在不反序列化的情况下重新排序。
+ *    参见 SPARK-4550，这是此优化首次提出和实现的地方。
  *
- *  - It uses a specialized cache-efficient sorter ([[ShuffleExternalSorter]]) that sorts
- *    arrays of compressed record pointers and partition ids. By using only 8 bytes of space per
- *    record in the sorting array, this fits more of the array into cache.
+ *  - 使用专门的缓存高效排序器 ([[ShuffleExternalSorter]])，对压缩记录指针和分区 ID 的数组进行排序。
+ *    排序数组中每条记录仅使用 8 字节空间，使更多数组内容能放入缓存。
  *
- *  - The spill merging procedure operates on blocks of serialized records that belong to the same
- *    partition and does not need to deserialize records during the merge.
+ *  - 溢写合并过程对属于同一分区的序列化记录块进行操作，合并期间无需反序列化记录。
  *
- *  - When the spill compression codec supports concatenation of compressed data, the spill merge
- *    simply concatenates the serialized and compressed spill partitions to produce the final output
- *    partition.  This allows efficient data copying methods, like NIO's `transferTo`, to be used
- *    and avoids the need to allocate decompression or copying buffers during the merge.
+ *  - 当溢写压缩编解码器支持压缩数据的拼接时，溢写合并只需拼接已序列化和压缩的溢写分区
+ *    即可生成最终输出分区。这允许使用高效的数据复制方法（如 NIO 的 `transferTo`），
+ *    并避免在合并期间分配解压或复制缓冲区。
  *
- * For more details on these optimizations, see SPARK-7081.
+ * 有关这些优化的更多详情，请参见 SPARK-7081。
  */
 private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager with Logging {
 
   import SortShuffleManager._
 
   /**
-   * A mapping from shuffle ids to the task ids of mappers producing output for those shuffles.
+   * 从 Shuffle ID 到产生这些 Shuffle 输出的 Mapper 任务 ID 的映射。
    */
   private[this] val taskIdMapsForShuffle = new ConcurrentHashMap[Int, OpenHashSet[Long]]()
 
@@ -85,36 +82,34 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
     new IndexShuffleBlockResolver(conf, taskIdMapsForShuffle = taskIdMapsForShuffle)
 
   /**
-   * Obtains a [[ShuffleHandle]] to pass to tasks.
+   * 获取一个 [[ShuffleHandle]] 用于传递给任务。
    */
   override def registerShuffle[K, V, C](
       shuffleId: Int,
       dependency: ShuffleDependency[K, V, C]): ShuffleHandle = {
     if (SortShuffleWriter.shouldBypassMergeSort(conf, dependency)) {
-      // If there are fewer than spark.shuffle.sort.bypassMergeThreshold partitions and we don't
-      // need map-side aggregation, then write numPartitions files directly and just concatenate
-      // them at the end. This avoids doing serialization and deserialization twice to merge
-      // together the spilled files, which would happen with the normal code path. The downside is
-      // having multiple files open at a time and thus more memory allocated to buffers.
+      // 如果分区数少于 spark.shuffle.sort.bypassMergeThreshold 且不需要 Map 端聚合，
+      // 则直接写入 numPartitions 个文件，最后只需拼接它们。
+      // 这避免了使用正常代码路径时需要对溢写文件进行两次序列化/反序列化来合并。
+      // 缺点是需要同时打开多个文件，因此会有更多内存用于缓冲区。
       new BypassMergeSortShuffleHandle[K, V](
         shuffleId, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
     } else if (SortShuffleManager.canUseSerializedShuffle(dependency)) {
-      // Otherwise, try to buffer map outputs in a serialized form, since this is more efficient:
+      // 否则，尝试以序列化形式缓冲 Map 输出，因为这样更高效
       new SerializedShuffleHandle[K, V](
         shuffleId, dependency.asInstanceOf[ShuffleDependency[K, V, V]])
     } else {
-      // Otherwise, buffer map outputs in a deserialized form:
+      // 否则，以反序列化形式缓冲 Map 输出
       new BaseShuffleHandle(shuffleId, dependency)
     }
   }
 
   /**
-   * Get a reader for a range of reduce partitions (startPartition to endPartition-1, inclusive) to
-   * read from a range of map outputs(startMapIndex to endMapIndex-1, inclusive).
-   * If endMapIndex=Int.MaxValue, the actual endMapIndex will be changed to the length of total map
-   * outputs of the shuffle in `getMapSizesByExecutorId`.
+   * 获取读取指定范围 Reduce 分区（startPartition 到 endPartition-1）的读取器，
+   * 从指定范围的 Map 输出（startMapIndex 到 endMapIndex-1）中读取。
+   * 如果 endMapIndex=Int.MaxValue，实际值将在 getMapSizesByExecutorId 中替换为总 Map 输出数。
    *
-   * Called on executors by reduce tasks.
+   * 在 Executor 上由 Reduce 任务调用。
    */
   override def getReader[K, C](
       handle: ShuffleHandle,
@@ -141,7 +136,10 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
         canEnableBatchFetch && canUseBatchFetch(startPartition, endPartition, context))
   }
 
-  /** Get a writer for a given partition. Called on executors by map tasks. */
+  /**
+   * 获取指定分区的写入器。
+   * 在 Executor 上由 Map 任务调用。
+   */
   override def getWriter[K, V](
       handle: ShuffleHandle,
       mapId: Long,
@@ -175,7 +173,7 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
     }
   }
 
-  /** Remove a shuffle's metadata from the ShuffleManager. */
+  /** 从 ShuffleManager 中移除 Shuffle 的元数据 */
   override def unregisterShuffle(shuffleId: Int): Boolean = {
     Option(taskIdMapsForShuffle.remove(shuffleId)).foreach { mapTaskIds =>
       mapTaskIds.synchronized {
@@ -187,7 +185,7 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
     true
   }
 
-  /** Shut down this ShuffleManager. */
+  /** 关闭此 ShuffleManager */
   override def stop(): Unit = {
     shuffleBlockResolver.stop()
   }
@@ -197,22 +195,20 @@ private[spark] class SortShuffleManager(conf: SparkConf) extends ShuffleManager 
 private[spark] object SortShuffleManager extends Logging {
 
   /**
-   * The maximum number of shuffle output partitions that SortShuffleManager supports when
-   * buffering map outputs in a serialized form. This is an extreme defensive programming measure,
-   * since it's extremely unlikely that a single shuffle produces over 16 million output partitions.
+   * 当以序列化形式缓冲 Map 输出时，SortShuffleManager 支持的最大 Shuffle 输出分区数。
+   * 这是一个极端的防御性编程措施，因为单个 Shuffle 产生超过 1600 万个输出分区极其罕见。
    */
   val MAX_SHUFFLE_OUTPUT_PARTITIONS_FOR_SERIALIZED_MODE =
     PackedRecordPointer.MAXIMUM_PARTITION_ID + 1
 
   /**
-   * The local property key for continuous shuffle block fetching feature.
+   * 连续 Shuffle 数据块获取功能的本地属性键。
    */
   val FETCH_SHUFFLE_BLOCKS_IN_BATCH_ENABLED_KEY =
     "__fetch_continuous_blocks_in_batch_enabled"
 
   /**
-   * Helper method for determining whether a shuffle reader should fetch the continuous blocks
-   * in batch.
+   * 辅助方法，用于确定 Shuffle Reader 是否应批量获取连续数据块。
    */
   def canUseBatchFetch(startPartition: Int, endPartition: Int, context: TaskContext): Boolean = {
     val fetchMultiPartitions = endPartition - startPartition > 1
@@ -221,8 +217,8 @@ private[spark] object SortShuffleManager extends Logging {
   }
 
   /**
-   * Helper method for determining whether a shuffle should use an optimized serialized shuffle
-   * path or whether it should fall back to the original path that operates on deserialized objects.
+   * 辅助方法，用于确定 Shuffle 是否应使用优化的序列化 Shuffle 路径，
+   * 还是应回退到操作反序列化对象的原始路径。
    */
   def canUseSerializedShuffle(dependency: ShuffleDependency[_, _, _]): Boolean = {
     val shufId = dependency.shuffleId
@@ -258,8 +254,7 @@ private[spark] object SortShuffleManager extends Logging {
 }
 
 /**
- * Subclass of [[BaseShuffleHandle]], used to identify when we've chosen to use the
- * serialized shuffle.
+ * [[BaseShuffleHandle]] 的子类，用于标识我们已选择使用序列化 Shuffle。
  */
 private[spark] class SerializedShuffleHandle[K, V](
   shuffleId: Int,
@@ -268,8 +263,7 @@ private[spark] class SerializedShuffleHandle[K, V](
 }
 
 /**
- * Subclass of [[BaseShuffleHandle]], used to identify when we've chosen to use the
- * bypass merge sort shuffle path.
+ * [[BaseShuffleHandle]] 的子类，用于标识我们已选择使用 Bypass Merge Sort Shuffle 路径。
  */
 private[spark] class BypassMergeSortShuffleHandle[K, V](
   shuffleId: Int,

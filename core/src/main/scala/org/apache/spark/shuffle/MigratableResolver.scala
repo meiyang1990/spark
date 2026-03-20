@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.annotation.{Experimental, Since}
@@ -25,30 +27,31 @@ import org.apache.spark.storage.BlockId
 
 /**
  * :: Experimental ::
- * An experimental trait to allow Spark to migrate shuffle blocks.
+ * 实验性接口，允许 Spark 迁移 Shuffle 数据块。
+ * 主要用于 Executor 下线时将 Shuffle 数据迁移到其他节点。
  */
 @Experimental
 @Since("3.1.0")
 trait MigratableResolver {
   /**
-   * Get the shuffle ids that are stored locally. Used for block migrations.
+   * 获取本地存储的 Shuffle 信息列表，用于数据块迁移。
    */
   def getStoredShuffles(): Seq[ShuffleBlockInfo]
 
   /**
-   * Mark a shuffle that should not be migrated.
+   * 标记不应迁移的 Shuffle。
    */
   def addShuffleToSkip(shuffleId: Int): Unit = {}
 
   /**
-   * Write a provided shuffle block as a stream. Used for block migrations.
-   * Up to the implementation to support STORAGE_REMOTE_SHUFFLE_MAX_DISK
+   * 以流的方式写入 Shuffle 数据块，用于数据块迁移。
+   * 实现者可支持 STORAGE_REMOTE_SHUFFLE_MAX_DISK 配置限制。
    */
   def putShuffleBlockAsStream(blockId: BlockId, serializerManager: SerializerManager):
       StreamCallbackWithID
 
   /**
-   * Get the blocks for migration for a particular shuffle and map.
+   * 获取指定 Shuffle 和 Map 的数据块用于迁移。
    */
   def getMigrationBlocks(shuffleBlockInfo: ShuffleBlockInfo): List[(BlockId, ManagedBuffer)]
 }

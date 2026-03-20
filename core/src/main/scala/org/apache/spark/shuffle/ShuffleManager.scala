@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import java.util.Locale
@@ -24,27 +26,28 @@ import org.apache.spark.internal.config
 import org.apache.spark.util.Utils
 
 /**
- * Pluggable interface for shuffle systems. A ShuffleManager is created in SparkEnv on the driver
- * and on each executor, based on the spark.shuffle.manager setting. The driver registers shuffles
- * with it, and executors (or tasks running locally in the driver) can ask to read and write data.
+ * Shuffle 系统的可插拔接口。
+ * ShuffleManager 在 Driver 和每个 Executor 的 SparkEnv 中创建，基于 spark.shuffle.manager 配置。
+ * Driver 向其注册 Shuffle，Executor（或在 Driver 本地运行的任务）可以请求读写数据。
  *
- * NOTE:
- * 1. This will be instantiated by SparkEnv so its constructor can take a SparkConf and
- * boolean isDriver as parameters.
- * 2. This contains a method ShuffleBlockResolver which interacts with External Shuffle Service
- * when it is enabled. Need to pay attention to that, if implementing a custom ShuffleManager, to
- * make sure the custom ShuffleManager could co-exist with External Shuffle Service.
+ * 注意：
+ * 1. 由 SparkEnv 实例化，构造函数可接受 SparkConf 和 boolean isDriver 参数
+ * 2. 包含 ShuffleBlockResolver 方法，与 External Shuffle Service 交互。
+ *    实现自定义 ShuffleManager 时需确保能与 External Shuffle Service 共存
  */
 private[spark] trait ShuffleManager {
 
   /**
-   * Register a shuffle with the manager and obtain a handle for it to pass to tasks.
+   * 向管理器注册 Shuffle 并获取一个句柄用于传递给任务。
    */
   def registerShuffle[K, V, C](
       shuffleId: Int,
       dependency: ShuffleDependency[K, V, C]): ShuffleHandle
 
-  /** Get a writer for a given partition. Called on executors by map tasks. */
+  /**
+   * 获取指定分区的写入器。
+   * 在 Executor 上由 Map 任务调用。
+   */
   def getWriter[K, V](
       handle: ShuffleHandle,
       mapId: Long,
@@ -53,10 +56,10 @@ private[spark] trait ShuffleManager {
 
 
   /**
-   * Get a reader for a range of reduce partitions (startPartition to endPartition-1, inclusive) to
-   * read from all map outputs of the shuffle.
+   * 获取读取指定范围 Reduce 分区（startPartition 到 endPartition-1）的读取器，
+   * 从该 Shuffle 的所有 Map 输出中读取。
    *
-   * Called on executors by reduce tasks.
+   * 在 Executor 上由 Reduce 任务调用。
    */
   final def getReader[K, C](
       handle: ShuffleHandle,
@@ -68,12 +71,11 @@ private[spark] trait ShuffleManager {
   }
 
   /**
-   * Get a reader for a range of reduce partitions (startPartition to endPartition-1, inclusive) to
-   * read from a range of map outputs(startMapIndex to endMapIndex-1, inclusive).
-   * If endMapIndex=Int.MaxValue, the actual endMapIndex will be changed to the length of total map
-   * outputs of the shuffle in `getMapSizesByExecutorId`.
+   * 获取读取指定范围 Reduce 分区（startPartition 到 endPartition-1）的读取器，
+   * 从指定范围的 Map 输出（startMapIndex 到 endMapIndex-1）中读取。
+   * 如果 endMapIndex=Int.MaxValue，实际值将在 getMapSizesByExecutorId 中替换为总 Map 输出数。
    *
-   * Called on executors by reduce tasks.
+   * 在 Executor 上由 Reduce 任务调用。
    */
   def getReader[K, C](
       handle: ShuffleHandle,
@@ -85,22 +87,23 @@ private[spark] trait ShuffleManager {
       metrics: ShuffleReadMetricsReporter): ShuffleReader[K, C]
 
   /**
-   * Remove a shuffle's metadata from the ShuffleManager.
-   * @return true if the metadata removed successfully, otherwise false.
+   * 从 ShuffleManager 中移除 Shuffle 的元数据。
+   *
+   * @return 成功移除返回 true，否则返回 false
    */
   def unregisterShuffle(shuffleId: Int): Boolean
 
   /**
-   * Return a resolver capable of retrieving shuffle block data based on block coordinates.
+   * 返回能够根据块坐标检索 Shuffle 数据块的解析器。
    */
   def shuffleBlockResolver: ShuffleBlockResolver
 
-  /** Shut down this ShuffleManager. */
+  /** 关闭此 ShuffleManager */
   def stop(): Unit
 }
 
 /**
- * Utility companion object to create a ShuffleManager given a spark configuration.
+ * 用于根据 Spark 配置创建 ShuffleManager 的工具伴生对象。
  */
 private[spark] object ShuffleManager {
   def create(conf: SparkConf, isDriver: Boolean): ShuffleManager = {
@@ -109,6 +112,7 @@ private[spark] object ShuffleManager {
   }
 
   def getShuffleManagerClassName(conf: SparkConf): String = {
+    // 简短名称映射到实际类名
     val shortShuffleMgrNames = Map(
       "sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName,
       "tungsten-sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName)

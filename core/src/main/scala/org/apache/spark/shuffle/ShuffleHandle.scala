@@ -15,14 +15,16 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.annotation.DeveloperApi
 
 /**
- * An opaque handle to a shuffle, used by a ShuffleManager to pass information about it to tasks.
+ * Shuffle 的不透明句柄，ShuffleManager 使用它向任务传递 Shuffle 相关信息。
  *
- * @param shuffleId ID of the shuffle
+ * @param shuffleId Shuffle ID
  */
 @DeveloperApi
 abstract class ShuffleHandle(val shuffleId: Int) extends Serializable {}

@@ -15,12 +15,15 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.ShuffleDependency
 
 /**
- * A basic ShuffleHandle implementation that just captures registerShuffle's parameters.
+ * 基础 ShuffleHandle 实现，仅捕获 registerShuffle 的参数。
+ * 用于保存 Shuffle 操作的句柄信息，包括 shuffleId 和对应的 ShuffleDependency。
  */
 private[spark] class BaseShuffleHandle[K, V, C](
     shuffleId: Int,

@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
@@ -23,22 +25,30 @@ import org.apache.spark.internal.LogKeys.{NUM_MERGER_LOCATIONS, SHUFFLE_ID, STAG
 import org.apache.spark.scheduler.MapStatus
 
 /**
- * The interface for customizing shuffle write process. The driver create a ShuffleWriteProcessor
- * and put it into [[ShuffleDependency]], and executors use it in each ShuffleMapTask.
+ * 自定义 Shuffle 写入流程的接口。
+ * Driver 创建 ShuffleWriteProcessor 并放入 [[ShuffleDependency]]，
+ * Executor 在每个 ShuffleMapTask 中使用它。
  */
 private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
 
   /**
-   * Create a [[ShuffleWriteMetricsReporter]] from the task context. As the reporter is a
-   * per-row operator, here need a careful consideration on performance.
+   * 从任务上下文创建 [[ShuffleWriteMetricsReporter]]。
+   * 由于报告器是逐行操作，需仔细考虑性能。
    */
   protected def createMetricsReporter(context: TaskContext): ShuffleWriteMetricsReporter = {
     context.taskMetrics().shuffleWriteMetrics
   }
 
   /**
-   * The write process for particular partition, it controls the life circle of [[ShuffleWriter]]
-   * get from [[ShuffleManager]] finally return the [[MapStatus]] for this task.
+   * 特定分区的写入流程，控制从 [[ShuffleManager]] 获取的 [[ShuffleWriter]] 的生命周期，
+   * 最终返回此任务的 [[MapStatus]]。
+   *
+   * @param inputs 输入数据迭代器
+   * @param dep Shuffle 依赖
+   * @param mapId Map 任务 ID
+   * @param mapIndex Map 任务索引
+   * @param context 任务上下文
+   * @return MapStatus，包含数据块位置信息
    */
   def write(
       inputs: Iterator[_],
@@ -57,7 +67,7 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
       writer.write(inputs.asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
       val mapStatus = writer.stop(success = true)
       if (mapStatus.isDefined) {
-        // Check if sufficient shuffle mergers are available now for the ShuffleMapTask to push
+        // 检查是否有足够的 Shuffle merger 供 ShuffleMapTask 推送
         if (dep.shuffleMergeAllowed && dep.getMergerLocs.isEmpty) {
           val mapOutputTracker = SparkEnv.get.mapOutputTracker
           val mergerLocs =
@@ -66,10 +76,9 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
             dep.setMergerLocs(mergerLocs)
           }
         }
-        // Initiate shuffle push process if push based shuffle is enabled
-        // The map task only takes care of converting the shuffle data file into multiple
-        // block push requests. It delegates pushing the blocks to a different thread-pool -
-        // ShuffleBlockPusher.BLOCK_PUSHER_POOL.
+        // 如果启用了 Push-based Shuffle，启动 Shuffle 推送流程
+        // Map 任务只负责将 Shuffle 数据文件转换为多个数据块推送请求，
+        // 实际推送委托给另一个线程池 - ShuffleBlockPusher.BLOCK_PUSHER_POOL
         if (!dep.shuffleMergeFinalized) {
           manager.shuffleBlockResolver match {
             case resolver: IndexShuffleBlockResolver =>

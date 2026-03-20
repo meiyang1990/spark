@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.{FetchFailed, TaskContext, TaskFailedReason}
@@ -22,15 +24,22 @@ import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util.Utils
 
 /**
- * Failed to fetch a shuffle block. The executor catches this exception and propagates it
- * back to DAGScheduler (through TaskEndReason) so we'd resubmit the previous stage.
+ * Shuffle 数据块获取失败异常。
+ * Executor 捕获此异常并通过 TaskEndReason 传递给 DAGScheduler，以触发上一 Stage 的重新提交。
  *
- * Note that bmAddress can be null.
+ * 注意：bmAddress 可以为 null。
  *
- * To prevent user code from hiding this fetch failure, in the constructor we call
- * [[TaskContext.setFetchFailed()]].  This means that you *must* throw this exception immediately
- * after creating it -- you cannot create it, check some condition, and then decide to ignore it
- * (or risk triggering any other exceptions).  See SPARK-19276.
+ * 为防止用户代码隐藏此获取失败，在构造函数中调用 [[TaskContext.setFetchFailed()]]。
+ * 这意味着创建此异常后必须立即抛出——不能创建后检查某些条件再决定忽略
+ * （否则可能触发其他异常）。参见 SPARK-19276。
+ *
+ * @param bmAddress 失败的 BlockManager 地址，可为 null
+ * @param shuffleId Shuffle ID
+ * @param mapId Map 任务 ID
+ * @param mapIndex Map 任务索引
+ * @param reduceId Reduce ID（分区 ID）
+ * @param message 错误消息
+ * @param cause 原始异常
  */
 private[spark] class FetchFailedException(
     bmAddress: BlockManagerId,
@@ -52,18 +61,19 @@ private[spark] class FetchFailedException(
     this(bmAddress, shuffleId, mapTaskId, mapIndex, reduceId, cause.getMessage, cause)
   }
 
-  // SPARK-19276. We set the fetch failure in the task context, so that even if there is user-code
-  // which intercepts this exception (possibly wrapping it), the Executor can still tell there was
-  // a fetch failure, and send the correct error msg back to the driver.  We wrap with an Option
-  // because the TaskContext is not defined in some test cases.
+  // SPARK-19276: 将获取失败设置到任务上下文中，即使有用户代码拦截此异常（可能包装它），
+  // Executor 仍能识别发生了获取失败，并将正确的错误消息发送回 Driver。
+  // 使用 Option 包装是因为某些测试场景下 TaskContext 未定义。
   Option(TaskContext.get()).foreach(_.setFetchFailed(this))
 
+  /** 将异常转换为 TaskFailedReason，用于向 Driver 报告失败原因 */
   def toTaskFailedReason: TaskFailedReason = FetchFailed(
     bmAddress, shuffleId, mapId, mapIndex, reduceId, Utils.exceptionString(this))
 }
 
 /**
- * Failed to get shuffle metadata from [[org.apache.spark.MapOutputTracker]].
+ * 从 [[org.apache.spark.MapOutputTracker]] 获取 Shuffle 元数据失败异常。
+ * 当无法从 MapOutputTracker 获取 Map 输出位置信息时抛出。
  */
 private[spark] class MetadataFetchFailedException(
     shuffleId: Int,

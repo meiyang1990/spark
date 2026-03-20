@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.network.buffer.ManagedBuffer
@@ -23,41 +25,39 @@ import org.apache.spark.storage.{BlockId, ShuffleMergedBlockId}
 
 private[spark]
 /**
- * Implementers of this trait understand how to retrieve block data for a logical shuffle block
- * identifier (i.e. map, reduce, and shuffle). Implementations may use files or file segments to
- * encapsulate shuffle data. This is used by the BlockStore to abstract over different shuffle
- * implementations when shuffle data is retrieved.
+ * Shuffle 数据块解析器接口。
+ * 实现者知道如何根据逻辑 Shuffle 数据块标识符（map、reduce、shuffle）检索数据块数据。
+ * 实现可以使用文件或文件片段来封装 Shuffle 数据。
+ * BlockStore 使用此接口在检索 Shuffle 数据时抽象不同 Shuffle 实现。
  */
 trait ShuffleBlockResolver {
   type ShuffleId = Int
 
   /**
-   * Retrieve the data for the specified block.
+   * 获取指定数据块的数据。
    *
-   * When the dirs parameter is None then use the disk manager's local directories. Otherwise,
-   * read from the specified directories.
-   *
-   * If the data for that block is not available, throws an unspecified exception.
+   * @param dirs 如果为 None，使用 disk manager 的本地目录；否则从指定目录读取
+   * @throws Exception 如果数据块数据不可用
    */
   def getBlockData(blockId: BlockId, dirs: Option[Array[String]] = None): ManagedBuffer
 
   /**
-   * Retrieve a list of BlockIds for a given shuffle map. Used to delete shuffle files
-   * from the external shuffle service after the associated executor has been removed.
+   * 获取指定 Shuffle Map 的 BlockId 列表。
+   * 用于在关联的 Executor 被移除后从外部 Shuffle 服务删除 Shuffle 文件。
    */
   def getBlocksForShuffle(shuffleId: Int, mapId: Long): Seq[BlockId] = {
     Seq.empty
   }
 
   /**
-   * Retrieve the data for the specified merged shuffle block as multiple chunks.
+   * 获取指定合并 Shuffle 数据块的数据，以多个 chunk 形式返回。
    */
   def getMergedBlockData(
       blockId: ShuffleMergedBlockId,
       dirs: Option[Array[String]]): Seq[ManagedBuffer]
 
   /**
-   * Retrieve the meta data for the specified merged shuffle block.
+   * 获取指定合并 Shuffle 数据块的元数据。
    */
   def getMergedBlockMeta(
       blockId: ShuffleMergedBlockId,

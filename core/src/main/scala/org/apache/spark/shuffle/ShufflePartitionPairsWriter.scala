@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import java.io.{Closeable, OutputStream}
@@ -29,8 +31,15 @@ import org.apache.spark.util.Utils
 import org.apache.spark.util.collection.PairsWriter
 
 /**
- * A key-value writer inspired by {@link DiskBlockObjectWriter} that pushes the bytes to an
- * arbitrary partition writer instead of writing to local disk through the block manager.
+ * 键值对写入器，灵感来自 {@link DiskBlockObjectWriter}。
+ * 将字节推送到任意分区写入器，而非通过 BlockManager 写入本地磁盘。
+ *
+ * @param partitionWriter 分区写入器
+ * @param serializerManager 序列化管理器
+ * @param serializerInstance 序列化实例
+ * @param blockId 块 ID
+ * @param writeMetrics 写入指标报告器
+ * @param checksum 校验和（可选）
  */
 private[spark] class ShufflePartitionPairsWriter(
     partitionWriter: ShufflePartitionWriter,
@@ -48,8 +57,7 @@ private[spark] class ShufflePartitionPairsWriter(
   private var objOut: SerializationStream = _
   private var numRecordsWritten = 0
   private var curNumBytesWritten = 0L
-  // this would be only initialized when checksum != null,
-  // which indicates shuffle checksum is enabled.
+  // 仅当 checksum != null 时初始化，表示启用了 Shuffle 校验和
   private var checksumOutputStream: MutableCheckedOutputStream = _
 
   override def write(key: Any, value: Any): Unit = {
@@ -64,6 +72,7 @@ private[spark] class ShufflePartitionPairsWriter(
     recordWritten()
   }
 
+  /** 打开输出流进行写入 */
   private def open(): Unit = {
     try {
       partitionStream = partitionWriter.openStream
@@ -89,18 +98,18 @@ private[spark] class ShufflePartitionPairsWriter(
       Utils.tryWithSafeFinally {
         Utils.tryWithSafeFinally {
           objOut = closeIfNonNull(objOut)
-          // Setting these to null will prevent the underlying streams from being closed twice
-          // just in case any stream's close() implementation is not idempotent.
+          // 设置为 null 防止底层流被关闭两次
+          // 以防某些流的 close() 实现不是幂等的
           wrappedStream = null
           timeTrackingStream = null
           partitionStream = null
         } {
-          // Normally closing objOut would close the inner streams as well, but just in case there
-          // was an error in initialization etc. we make sure we clean the other streams up too.
+          // 通常关闭 objOut 会同时关闭内部流，但以防初始化等出错，
+          // 确保也清理其他流
           Utils.tryWithSafeFinally {
             wrappedStream = closeIfNonNull(wrappedStream)
-            // Same as above - if wrappedStream closes then assume it closes underlying
-            // partitionStream and don't close again in the finally
+            // 同上 - 如果 wrappedStream 关闭，假设它关闭了底层 partitionStream，
+            // 不要在 finally 中再次关闭
             timeTrackingStream = null
             partitionStream = null
           } {
@@ -127,7 +136,7 @@ private[spark] class ShufflePartitionPairsWriter(
   }
 
   /**
-   * Notify the writer that a record worth of bytes has been written with OutputStream#write.
+   * 通知写入器已通过 OutputStream#write 写入了一条记录的数据。
    */
   private def recordWritten(): Unit = {
     numRecordsWritten += 1
@@ -138,6 +147,7 @@ private[spark] class ShufflePartitionPairsWriter(
     }
   }
 
+  /** 更新已写入字节数的指标 */
   private def updateBytesWritten(): Unit = {
     val numBytesWritten = partitionWriter.getNumBytesWritten
     val bytesWrittenDiff = numBytesWritten - curNumBytesWritten

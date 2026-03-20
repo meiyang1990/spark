@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.SparkConf
@@ -22,13 +24,22 @@ import org.apache.spark.internal.config.SHUFFLE_IO_PLUGIN_CLASS
 import org.apache.spark.shuffle.api.ShuffleDataIO
 import org.apache.spark.util.Utils
 
+/** Shuffle 数据 IO 工具类 */
 private[spark] object ShuffleDataIOUtils {
 
   /**
-   * The prefix of spark config keys that are passed from the driver to the executor.
+   * 从 Driver 传递到 Executor 的 Spark 配置键前缀。
+   * 用于 Shuffle 插件配置的传递。
    */
   val SHUFFLE_SPARK_CONF_PREFIX = "spark.shuffle.plugin.__config__."
 
+  /**
+   * 加载 ShuffleDataIO 插件实例。
+   * 根据配置动态加载 Shuffle IO 插件类。
+   *
+   * @param conf Spark 配置
+   * @return ShuffleDataIO 实例
+   */
   def loadShuffleDataIO(conf: SparkConf): ShuffleDataIO = {
     val configuredPluginClass = conf.get(SHUFFLE_IO_PLUGIN_CLASS)
     val maybeIO = Utils.loadExtensions(

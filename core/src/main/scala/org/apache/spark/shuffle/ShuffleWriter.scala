@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import java.io.IOException
@@ -22,16 +24,25 @@ import java.io.IOException
 import org.apache.spark.scheduler.MapStatus
 
 /**
- * Obtained inside a map task to write out records to the shuffle system.
+ * 在 Map 任务中获取，用于将记录写入 Shuffle 系统。
  */
 private[spark] abstract class ShuffleWriter[K, V] {
-  /** Write a sequence of records to this task's output */
+  /**
+   * 将一批记录写入此任务的输出。
+   *
+   * @throws IOException 写入过程中发生 I/O 错误
+   */
   @throws[IOException]
   def write(records: Iterator[Product2[K, V]]): Unit
 
-  /** Close this writer, passing along whether the map completed */
+  /**
+   * 关闭此写入器，并传递 Map 任务是否成功完成。
+   *
+   * @param success Map 任务是否成功完成
+   * @return 成功时返回 Some(MapStatus)，失败时返回 None
+   */
   def stop(success: Boolean): Option[MapStatus]
 
-  /** Get the lengths of each partition */
+  /** 获取各分区的数据长度 */
   def getPartitionLengths(): Array[Long]
 }

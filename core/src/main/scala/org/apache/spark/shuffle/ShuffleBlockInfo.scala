@@ -15,14 +15,18 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 import org.apache.spark.annotation.Experimental
 
 /**
  * :: Experimental ::
- * An experimental case class used by MigratableResolver to return the shuffleId and mapId in a
- * type safe way.
+ * 实验性 case class，用于 MigratableResolver 以类型安全的方式返回 shuffleId 和 mapId。
+ *
+ * @param shuffleId Shuffle ID
+ * @param mapId Map 任务 ID
  */
 @Experimental
 case class ShuffleBlockInfo(shuffleId: Int, mapId: Long) {

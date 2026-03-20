@@ -15,19 +15,23 @@
  * limitations under the License.
  */
 
+// 这个文件已经全部加上中文注释
+
 package org.apache.spark.shuffle
 
 /**
- * Obtained inside a reduce task to read combined records from the mappers.
+ * 在 Reduce 任务中获取，用于从 Mapper 读取合并后的记录。
  */
 private[spark] trait ShuffleReader[K, C] {
-  /** Read the combined key-values for this reduce task */
+  /**
+   * 读取此 Reduce 任务的合并键值对。
+   * 返回一个迭代器，包含所有从 Map 任务获取的数据记录。
+   */
   def read(): Iterator[Product2[K, C]]
 
   /**
-   * Close this reader.
-   * TODO: Add this back when we make the ShuffleReader a developer API that others can implement
-   * (at which point this will likely be necessary).
+   * 关闭此读取器。
+   * TODO: 当 ShuffleReader 成为开发者 API 后添加此方法（届时可能需要）
    */
   // def stop(): Unit
 }
