@@ -34,11 +34,13 @@ import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage.{BlockId, BlockManager, ShuffleBlockBatchId, ShuffleBlockId, StorageLevel}
 
 /**
- * Serves requests to open blocks by simply registering one chunk per block requested.
- * Handles opening and uploading arbitrary BlockManager blocks.
+ * NettyBlockRpcServer 是基于 Netty 的块 RPC 服务器实现。
+ * 它负责处理打开块的请求，通过“one-for-one”策略注册块，使得每个传输层的 Chunk 对应一个 Spark 级别的 shuffle 块。
+ * 它同时支持打开和上传任意 BlockManager 块。
  *
- * Opened blocks are registered with the "one-for-one" strategy, meaning each Transport-layer Chunk
- * is equivalent to one Spark-level shuffle block.
+ * @param appId 应用程序 ID。
+ * @param serializer 序列化器，用于序列化/反序列化块数据或元数据。
+ * @param blockManager 块数据管理器，提供对本地块数据的读写接口。
  */
 class NettyBlockRpcServer(
     appId: String,
@@ -46,8 +48,10 @@ class NettyBlockRpcServer(
     blockManager: BlockDataManager)
   extends RpcHandler with Logging {
 
+  // 管理块传输的 StreamManager，使用 one-for-one 策略
   private val streamManager = new OneForOneStreamManager()
 
+  // 处理传入的 RPC 请求，如 OpenBlocks、FetchShuffleBlocks、UploadBlock 等
   override def receive(
       client: TransportClient,
       rpcMessage: ByteBuffer,
@@ -76,6 +80,7 @@ class NettyBlockRpcServer(
     logTrace(s"Received request: $message")
 
     message match {
+      // 处理打开块的请求
       case openBlocks: OpenBlocks =>
         val blocksNum = openBlocks.blockIds.length
         val blocks = (0 until blocksNum).map { i =>
@@ -89,6 +94,7 @@ class NettyBlockRpcServer(
         logTrace(s"Registered streamId $streamId with $blocksNum buffers")
         responseContext.onSuccess(new StreamHandle(streamId, blocksNum).toByteBuffer)
 
+      // 处理获取 Shuffle 块的请求
       case fetchShuffleBlocks: FetchShuffleBlocks =>
         val blocks = fetchShuffleBlocks.mapIds.zipWithIndex.flatMap { case (mapId, index) =>
           if (!fetchShuffleBlocks.batchFetchEnabled) {
@@ -169,6 +175,7 @@ class NettyBlockRpcServer(
     }
   }
 
+  // 处理流式上传块的请求，返回一个回调接口处理具体的流数据
   override def receiveStream(
       client: TransportClient,
       messageHeader: ByteBuffer,
@@ -179,11 +186,11 @@ class NettyBlockRpcServer(
     val blockId = BlockId(message.blockId)
     logDebug(s"Receiving replicated block $blockId with level ${level} as stream " +
       s"from ${client.getSocketAddress}")
-    // This will return immediately, but will setup a callback on streamData which will still
-    // do all the processing in the netty thread.
+    // 此处会立即返回，但会为 streamData 设置回调，后续处理仍在 Netty 线程中进行
     blockManager.putBlockDataAsStream(blockId, level, classTag)
   }
 
+  // 辅助方法：反序列化元数据（存储级别和 ClassTag）
   private def deserializeMetadata[T](metadata: Array[Byte]): (StorageLevel, ClassTag[T]) = {
     serializer
       .newInstance()
