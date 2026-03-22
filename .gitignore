@@ -141,3 +141,6 @@ tpcds-kit/
 .github/instructions/
 .github/prompts/
 .github/skills/
+
+# 代码注释生成器的项目上下文缓存
+.code_context/

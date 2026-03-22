@@ -111,6 +111,15 @@ import org.apache.spark.util.ArrayImplicits._
  *  - When adding a new data structure, update `DAGSchedulerSuite.assertDataStructuresEmpty` to
  *    include the new structure. This will help to catch memory leaks.
  */
+/**
+ * DAGScheduler 是 Spark 任务调度的核心组件（作业级调度器）。
+ *
+ * <h3>主要职责：</h3>
+ * 1. <b>DAG 划分</b>：将用户提交的 RDD 逻辑转换图（DAG）切分为多个 Stage（基于宽依赖）。
+ * 2. <b>Stage 调度</b>：根据 Stage 之间的依赖关系决定它们的提交顺序。
+ * 3. <b>计算位置选择</b>：为每个 Stage 的 Task 选择最优的计算位置（数据本地性）。
+ * 4. <b>失败重试</b>：处理 Stage 失败及 Task 失败，并在必要时重新提交 Stage。
+ */
 private[spark] class DAGScheduler(
     private[scheduler] val sc: SparkContext,
     private[scheduler] val taskScheduler: TaskScheduler,
